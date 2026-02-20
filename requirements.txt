@@ -1,0 +1,3 @@
+PySide6==6.8.3
+huggingface-hub>=0.25.0
+# llama-cpp-python は Start.cmd で CUDA版を直接インストール (requirements.txtでは管理しない)

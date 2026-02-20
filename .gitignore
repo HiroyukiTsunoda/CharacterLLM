@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Models (large binary files)
+models/*.gguf
+models/.cache/
+
+# Logs
+logs/*.log
+
+# IDE
+.cursor/
+
+# OS
+.DS_Store
+Thumbs.db
