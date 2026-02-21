@@ -13,5 +13,18 @@
     "top_p": 0.9,
     "max_tokens": 600,
     "repeat_penalty": 1.15
+  },
+  "tts": {
+    "enabled": true,
+    "model_path": "tts_models\\jvnv-M1-jp\\jvnv-M1-jp_e158_s14000.safetensors",
+    "config_path": "tts_models\\jvnv-M1-jp\\config.json",
+    "style_vec_path": "tts_models\\jvnv-M1-jp\\style_vectors.npy",
+    "style": "Neutral",
+    "speaker_id": 0,
+    "sdp_ratio": 0.2,
+    "noise": 0.5,
+    "noise_w": 0.7,
+    "length": 1.15,
+    "style_weight": 5.0
   }
 }

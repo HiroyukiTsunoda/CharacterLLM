@@ -1,3 +1,10 @@
 PySide6==6.8.3
+numpy<2
 huggingface-hub>=0.25.0
+setuptools<75
+faster-whisper
+sounddevice
+style-bert-vits2
 # llama-cpp-python は Start.cmd で CUDA版を直接インストール (requirements.txtでは管理しない)
+# PyTorch (CUDA版) も環境に合わせて別途インストール:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124

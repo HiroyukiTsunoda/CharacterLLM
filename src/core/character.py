@@ -84,6 +84,53 @@ class GenerationParams:
 
 
 @dataclass
+class TTSParams:
+    """キャラクターごとの Style-Bert-VITS2 音声合成パラメータ。"""
+    enabled: bool = False
+    model_path: str = ""
+    config_path: str = ""
+    style_vec_path: str = ""
+    style: str = "Neutral"
+    speaker_id: int = 0
+    sdp_ratio: float = 0.2
+    noise: float = 0.6
+    noise_w: float = 0.8
+    length: float = 1.0
+    style_weight: float = 5.0
+
+    def to_dict(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "model_path": self.model_path,
+            "config_path": self.config_path,
+            "style_vec_path": self.style_vec_path,
+            "style": self.style,
+            "speaker_id": self.speaker_id,
+            "sdp_ratio": self.sdp_ratio,
+            "noise": self.noise,
+            "noise_w": self.noise_w,
+            "length": self.length,
+            "style_weight": self.style_weight,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> TTSParams:
+        return cls(
+            enabled=data.get("enabled", False),
+            model_path=data.get("model_path", ""),
+            config_path=data.get("config_path", ""),
+            style_vec_path=data.get("style_vec_path", ""),
+            style=data.get("style", "Neutral"),
+            speaker_id=data.get("speaker_id", 0),
+            sdp_ratio=data.get("sdp_ratio", 0.2),
+            noise=data.get("noise", 0.6),
+            noise_w=data.get("noise_w", 0.8),
+            length=data.get("length", 1.0),
+            style_weight=data.get("style_weight", 5.0),
+        )
+
+
+@dataclass
 class Character:
     """キャラクター定義。"""
     id: str
@@ -91,6 +138,7 @@ class Character:
     avatar: str = ""
     personality: Personality = field(default_factory=Personality)
     generation_params: GenerationParams = field(default_factory=GenerationParams)
+    tts_params: TTSParams = field(default_factory=TTSParams)
 
     def to_dict(self) -> dict:
         return {
@@ -99,6 +147,7 @@ class Character:
             "avatar": self.avatar,
             "personality": self.personality.to_dict(),
             "generation_params": self.generation_params.to_dict(),
+            "tts": self.tts_params.to_dict(),
         }
 
     @classmethod
@@ -109,6 +158,7 @@ class Character:
             avatar=data.get("avatar", ""),
             personality=Personality.from_dict(data.get("personality", {})),
             generation_params=GenerationParams.from_dict(data.get("generation_params", {})),
+            tts_params=TTSParams.from_dict(data.get("tts", {})),
         )
 
     def get_system_message(self) -> dict:

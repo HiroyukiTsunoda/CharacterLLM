@@ -1,6 +1,7 @@
 {
   "models_dir": "models",
   "characters_dir": "characters",
+  "tts_models_dir": "tts_models",
   "database_path": "data/chat_history.db",
   "default_model": null,
   "default_character": "default_assistant",
@@ -20,5 +21,20 @@
     "window_width": 1920,
     "window_height": 1080,
     "font_size": 14
+  },
+  "voice": {
+    "input_device": 1,
+    "output_device": 11,
+    "whisper_model": "medium",
+    "device": "cuda",
+    "compute_type": "float16",
+    "language": "ja",
+    "auto_send": false
+  },
+  "tts": {
+    "enabled": true,
+    "use_gpu": true,
+    "auto_play": true,
+    "bert_model": "ku-nlp/deberta-v2-large-japanese-char-wwm"
   }
 }

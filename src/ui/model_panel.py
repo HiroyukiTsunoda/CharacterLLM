@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from src.core.gpu_utils import check_vram_fit, get_primary_gpu_info
 from src.core.model_loader import HFModelEntry, ModelLoader
+from src.ui import install_wheel_guard
 from src.ui.styles import COLORS
 
 logger = logging.getLogger(__name__)
@@ -130,7 +131,7 @@ class ModelPanel(QWidget):
         local_layout = QVBoxLayout()
 
         self.model_list = QListWidget()
-        self.model_list.setMaximumHeight(150)
+        self.model_list.setMaximumHeight(250)
         local_layout.addWidget(self.model_list)
 
         model_btn_layout = QHBoxLayout()
@@ -182,6 +183,8 @@ class ModelPanel(QWidget):
 
         dl_group.setLayout(dl_layout)
         layout.addWidget(dl_group)
+
+        install_wheel_guard(self, self.dl_combo)
 
         layout.addStretch()
 
@@ -408,6 +411,11 @@ class ModelPanel(QWidget):
     # ------------------------------------------------------------------
     # VRAM 判定ヘルパー
     # ------------------------------------------------------------------
+
+    def refresh_vram(self):
+        """外部から呼び出し可能な VRAM 表示更新。"""
+        self._refresh_gpu_info()
+        self._update_vram_label()
 
     def _refresh_gpu_info(self):
         """GPU 情報を取得・更新する。"""

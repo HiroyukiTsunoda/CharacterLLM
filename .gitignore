@@ -11,6 +11,9 @@ build/
 models/*.gguf
 models/.cache/
 
+# TTS models (large binary files)
+tts_models/
+
 # Logs
 logs/*.log
 

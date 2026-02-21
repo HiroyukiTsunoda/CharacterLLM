@@ -10,6 +10,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QFont, QKeyEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.chat_engine import ChatEngine
+from src.core.voice_output import TTSEngine
 from src.ui.styles import CHAT_BUBBLE_ASSISTANT, CHAT_BUBBLE_USER, COLORS
 
 logger = logging.getLogger(__name__)
@@ -32,9 +34,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class InferenceWorker(QThread):
-    """別スレッドでストリーミング推論を実行する。"""
+    """別スレッドでストリーミング推論を実行する。
+
+    ストリームから THINK_STREAM_START / END マーカーを検出し、
+    思考トークンと応答トークンを別シグナルで通知する。
+    """
 
     token_received = Signal(str)
+    think_token_received = Signal(str)
     finished_signal = Signal(str)
     error_signal = Signal(str)
 
@@ -48,14 +55,68 @@ class InferenceWorker(QThread):
     def run(self):
         try:
             stream = self.chat_engine.chat_stream(self.user_input)
+            in_think = False
             for token in stream:
-                self._full_response += token
-                self.token_received.emit(token)
-            self._think_content = self.chat_engine.get_last_think_content()
+                if token == ChatEngine.THINK_STREAM_START:
+                    in_think = True
+                    continue
+                if token == ChatEngine.THINK_STREAM_END:
+                    in_think = False
+                    continue
+                if in_think:
+                    self._think_content += token
+                    self.think_token_received.emit(token)
+                else:
+                    self._full_response += token
+                    self.token_received.emit(token)
             self.chat_engine.finalize_stream(self._full_response)
+
+            # LLM (llama.cpp) の CUDA 操作を完全に完了させてから
+            # finished_signal を発信する。後続の TTS が GPU を安全に使えるようにする。
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+            except Exception:
+                pass
+
             self.finished_signal.emit(self._full_response)
         except Exception as e:
             logger.error("Inference error: %s", e)
+            self.error_signal.emit(str(e))
+
+
+# ---------------------------------------------------------------------------
+# TTS ワーカースレッド
+# ---------------------------------------------------------------------------
+
+class TTSWorker(QThread):
+    """別スレッドで音声合成と再生を実行する。"""
+
+    finished_signal = Signal()
+    error_signal = Signal(str)
+
+    def __init__(
+        self,
+        tts_engine: TTSEngine,
+        text: str,
+        character,
+        output_device: int | None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._tts_engine = tts_engine
+        self._text = text
+        self._character = character
+        self._output_device = output_device
+
+    def run(self):
+        try:
+            sr, audio = self._tts_engine.synthesize(self._text, self._character)
+            self._tts_engine.play_audio(sr, audio, self._output_device)
+            self.finished_signal.emit()
+        except Exception as e:
+            logger.error("TTS playback error: %s", e)
             self.error_signal.emit(str(e))
 
 
@@ -190,6 +251,30 @@ class ChatBubble(QFrame):
         self.think_header.setVisible(True)
         self.think_label.setText(text)
 
+    def append_think_text(self, text: str):
+        """ストリーミング中に思考テキストを追加する。
+
+        初回呼び出し時にヘッダーを表示する（折りたたみ状態）。
+        """
+        if self.is_user or not hasattr(self, "think_label"):
+            return
+        if not self.think_header.isVisible():
+            self.think_header.setVisible(True)
+            self._think_expanded = False
+            self.think_label.setVisible(False)
+            self.think_header.setText("▶ 思考中...")
+        current = self.think_label.text()
+        self.think_label.setText(current + text)
+
+    def finish_think_stream(self):
+        """思考ストリーミング完了。ヘッダーテキストを通常表示に戻す。"""
+        if self.is_user or not hasattr(self, "think_header"):
+            return
+        if self._think_expanded:
+            self.think_header.setText("▼ 思考")
+        else:
+            self.think_header.setText("▶ 思考")
+
     # ------------------------------------------------------------------
     # テキスト操作
     # ------------------------------------------------------------------
@@ -218,14 +303,26 @@ class MessageInput(QPlainTextEdit):
         self.setPlaceholderText("メッセージを入力... (Enter で送信、Shift+Enter で改行)")
         self.setMaximumHeight(120)
         self.setMinimumHeight(44)
+        self._composing = False
+
+    def inputMethodEvent(self, event):
+        self._composing = bool(event.preeditString())
+        super().inputMethodEvent(event)
+
+    def inputMethodQuery(self, query):
+        if query == Qt.InputMethodQuery.ImCursorRectangle:
+            rect = self.cursorRect()
+            return rect.translated(0, self.fontMetrics().height() + 2)
+        return super().inputMethodQuery(query)
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if self._composing:
+                super().keyPressEvent(event)
+                return
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                # Shift+Enter: 改行
                 super().keyPressEvent(event)
             else:
-                # Enter: 送信
                 text = self.toPlainText().strip()
                 if text:
                     self.submit_signal.emit(text)
@@ -243,10 +340,20 @@ class ChatWidget(QWidget):
 
     BUBBLE_WIDTH_RATIO = 0.75
 
-    def __init__(self, chat_engine: ChatEngine, parent=None):
+    def __init__(
+        self,
+        chat_engine: ChatEngine,
+        voice_engine=None,
+        tts_engine: TTSEngine | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.chat_engine = chat_engine
+        self._voice_engine = voice_engine
+        self._tts_engine = tts_engine
+        self._auto_send = True
         self._worker: Optional[InferenceWorker] = None
+        self._tts_worker: Optional[TTSWorker] = None
         self._current_bubble: Optional[ChatBubble] = None
         self._bubbles: list[ChatBubble] = []
         self._setup_ui()
@@ -271,6 +378,24 @@ class ChatWidget(QWidget):
         self.scroll_area.setWidget(self.messages_container)
         main_layout.addWidget(self.scroll_area, stretch=1)
 
+        # ---- 音声自動送信トグル ----
+        self.voice_bar = QWidget()
+        voice_bar_layout = QHBoxLayout(self.voice_bar)
+        voice_bar_layout.setContentsMargins(16, 4, 16, 0)
+        voice_bar_layout.setSpacing(6)
+        voice_bar_layout.addStretch()
+
+        self.auto_send_check = QCheckBox("音声入力を自動送信")
+        self.auto_send_check.setStyleSheet(
+            f"color: {COLORS['text_muted']}; font-size: 12px;"
+        )
+        self.auto_send_check.setChecked(self._auto_send)
+        self.auto_send_check.toggled.connect(self._on_auto_send_toggled)
+        voice_bar_layout.addWidget(self.auto_send_check)
+
+        self.voice_bar.setVisible(self._voice_engine is not None)
+        main_layout.addWidget(self.voice_bar)
+
         # ---- 入力エリア ----
         input_frame = QFrame()
         input_frame.setStyleSheet(f"""
@@ -286,6 +411,19 @@ class ChatWidget(QWidget):
         self.message_input = MessageInput()
         self.message_input.submit_signal.connect(self.send_message)
         input_layout.addWidget(self.message_input, stretch=1)
+
+        # マイクボタン（VoiceEngine がある場合のみ）
+        self.voice_button = None
+        if self._voice_engine is not None:
+            from src.ui.voice_button import VoiceButton
+
+            self.voice_button = VoiceButton(self._voice_engine)
+            self.voice_button.transcription_done.connect(self._on_transcription_done)
+            self.voice_button.error_signal.connect(
+                lambda err: self._show_status(f"音声認識エラー: {err}", error=True)
+            )
+            self.voice_button.state_changed.connect(self._on_voice_state_changed)
+            input_layout.addWidget(self.voice_button)
 
         self.send_button = QPushButton("送信")
         self.send_button.setMinimumHeight(44)
@@ -335,31 +473,40 @@ class ChatWidget(QWidget):
         # ワーカースレッド開始
         self._worker = InferenceWorker(self.chat_engine, text, self)
         self._worker.token_received.connect(self._on_token)
+        self._worker.think_token_received.connect(self._on_think_token)
         self._worker.finished_signal.connect(self._on_generation_done)
         self._worker.error_signal.connect(self._on_generation_error)
         self._worker.start()
 
     def _on_token(self, token: str):
-        """トークン受信時: バブルにテキスト追加。"""
+        """応答トークン受信時: バブルにテキスト追加。"""
         if self._current_bubble:
             self._current_bubble.append_text(token)
         self._scroll_to_bottom()
 
+    def _on_think_token(self, token: str):
+        """思考トークン受信時: バブルの思考セクションにテキスト追加。"""
+        if self._current_bubble:
+            self._current_bubble.append_think_text(token)
+        self._scroll_to_bottom()
+
     def _on_generation_done(self, full_response: str):
-        """生成完了。バブルのテキストをクリーンアップし思考内容を分離する。"""
+        """生成完了。最終テキストを確定し思考セクションのヘッダーを更新する。"""
         self._set_generating(False)
+        clean = ""
         if self._current_bubble:
             clean = ChatEngine.strip_think(full_response)
             self._current_bubble.set_text(clean)
-            think = ""
-            if self._worker:
-                think = self._worker._think_content
-            if not think:
-                think = ChatEngine.extract_think(full_response)
-            if think:
-                self._current_bubble.set_think_content(think)
+
+            if self._worker and self._worker._think_content:
+                self._current_bubble.set_think_content(
+                    self._worker._think_content,
+                )
+            self._current_bubble.finish_think_stream()
         self._current_bubble = None
         self._scroll_to_bottom()
+
+        self._try_tts_playback(clean)
 
     def _on_generation_error(self, error: str):
         """生成エラー。"""
@@ -368,6 +515,88 @@ class ChatWidget(QWidget):
             self._current_bubble.set_text(f"エラー: {error}")
         self._current_bubble = None
         self._show_status(f"推論エラー: {error}", error=True)
+
+    # ------------------------------------------------------------------
+    # 音声入力
+    # ------------------------------------------------------------------
+
+    def _on_transcription_done(self, text: str):
+        """音声認識完了。auto_send に応じて送信 or 挿入。"""
+        if self._auto_send:
+            self.send_message(text)
+        else:
+            self.message_input.setPlainText(text)
+            self.message_input.setFocus()
+
+    def _on_auto_send_toggled(self, checked: bool):
+        self._auto_send = checked
+
+    def _on_voice_state_changed(self, state: str):
+        """録音/認識状態に応じてステータスを表示。"""
+        if state == "recording":
+            self._show_status("録音中...")
+        elif state == "transcribing":
+            self._show_status("音声認識中...")
+        else:
+            self.status_label.setVisible(False)
+
+    def set_auto_send(self, enabled: bool):
+        """外部から auto_send を設定する。"""
+        self._auto_send = enabled
+        self.auto_send_check.setChecked(enabled)
+
+    # ------------------------------------------------------------------
+    # TTS 自動再生
+    # ------------------------------------------------------------------
+
+    def _try_tts_playback(self, text: str):
+        """条件を満たせば応答テキストを TTS で再生する。"""
+        if not text or not self._tts_engine:
+            logger.debug("TTS auto-play skipped: no text or no engine")
+            return
+        if not self._tts_engine.enabled:
+            logger.info("TTS auto-play skipped: global TTS disabled")
+            return
+        if not self._tts_engine.auto_play:
+            logger.info("TTS auto-play skipped: auto_play is off")
+            return
+
+        character = self.chat_engine.current_character
+        if character is None:
+            logger.info("TTS auto-play skipped: no character selected")
+            return
+        if not character.tts_params.enabled:
+            logger.info("TTS auto-play skipped: character '%s' TTS disabled", character.name)
+            return
+        if not character.tts_params.model_path:
+            logger.info("TTS auto-play skipped: character '%s' has no TTS model", character.name)
+            return
+
+        if self._tts_worker is not None and self._tts_worker.isRunning():
+            self._tts_engine.stop_playback()
+
+        output_device = None
+        if self._voice_engine:
+            output_device = self._voice_engine.output_device
+
+        self._show_status("音声を再生中...")
+        self._tts_worker = TTSWorker(
+            self._tts_engine, text, character, output_device, self,
+        )
+        self._tts_worker.finished_signal.connect(self._on_tts_finished)
+        self._tts_worker.error_signal.connect(self._on_tts_error)
+        self._tts_worker.start()
+
+    def _on_tts_finished(self):
+        self.status_label.setVisible(False)
+
+    def _on_tts_error(self, error: str):
+        self._show_status(f"TTS エラー: {error}", error=True)
+
+    def stop_tts(self):
+        """外部から TTS 再生を停止する。"""
+        if self._tts_engine:
+            self._tts_engine.stop_playback()
 
     # ------------------------------------------------------------------
     # ヘルパー
@@ -407,6 +636,7 @@ class ChatWidget(QWidget):
             self.send_button.setText("生成中...")
         else:
             self.send_button.setText("送信")
+            self.message_input.setFocus()
 
     def _show_status(self, text: str, error: bool = False):
         """ステータスラベルを表示。"""

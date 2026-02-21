@@ -28,9 +28,13 @@ from PySide6.QtWidgets import (
 from src.core.character import CharacterManager
 from src.core.chat_engine import ChatEngine
 from src.core.model_loader import ModelLoader
+from src.core.tts_model_manager import TTSModelManager
+from src.core.voice_input import VoiceEngine
+from src.core.voice_output import TTSEngine
 from src.ui.character_panel import CharacterPanel
 from src.ui.chat_widget import ChatWidget
 from src.ui.model_panel import ModelPanel
+from src.ui.voice_panel import VoicePanel
 from src.ui.styles import COLORS, DARK_THEME, SIDEBAR_STYLE
 
 logger = logging.getLogger(__name__)
@@ -54,6 +58,11 @@ class MainWindow(QMainWindow):
         self.chat_engine = ChatEngine(
             model_loader=self.model_loader,
             character_manager=self.character_manager,
+        )
+        self.voice_engine = VoiceEngine(config=config)
+        self.tts_engine = TTSEngine(config=config)
+        self.tts_model_manager = TTSModelManager(
+            models_dir=config.get("tts_models_dir", "tts_models"),
         )
 
         self._settings_dialog = None
@@ -131,6 +140,14 @@ class MainWindow(QMainWindow):
         self.model_panel = ModelPanel(self.model_loader)
         self.sidebar_tabs.addTab(self.model_panel, "モデル")
 
+        # 音声パネル
+        self.voice_panel = VoicePanel(
+            self.voice_engine,
+            tts_engine=self.tts_engine,
+            model_manager=self.tts_model_manager,
+        )
+        self.sidebar_tabs.addTab(self.voice_panel, "音声")
+
         sidebar_layout.addWidget(self.sidebar_tabs, stretch=1)
 
         self.splitter.addWidget(sidebar)
@@ -174,14 +191,18 @@ class MainWindow(QMainWindow):
         chat_layout.addWidget(self.chat_header)
 
         # チャットウィジェット
-        self.chat_widget = ChatWidget(self.chat_engine)
+        self.chat_widget = ChatWidget(
+            self.chat_engine,
+            voice_engine=self.voice_engine,
+            tts_engine=self.tts_engine,
+        )
         chat_layout.addWidget(self.chat_widget, stretch=1)
 
         self.splitter.addWidget(chat_area)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setCollapsible(0, False)
-        self.splitter.setSizes([408, 792])
+        self.splitter.setSizes([480, 720])
 
         main_layout.addWidget(self.splitter)
 
@@ -235,15 +256,26 @@ class MainWindow(QMainWindow):
         self.model_panel.model_loaded.connect(self._on_model_loaded)
         self.model_panel.model_unloaded.connect(self._on_model_unloaded)
 
+        # 音声設定変更時 → config 保存
+        self.voice_panel.config_changed.connect(self._on_voice_config_changed)
+
+        # TTS 設定変更時 → config + キャラクターJSON 保存
+        self.voice_panel.tts_config_changed.connect(self._on_tts_config_changed)
+
+        # 音声モデルのロード/アンロード時 → VRAM 表示更新
+        self.voice_panel.vram_changed.connect(self.model_panel.refresh_vram)
+
     # ------------------------------------------------------------------
     # イベントハンドラ
     # ------------------------------------------------------------------
 
     def _on_character_selected(self, character_id: str):
-        """キャラクターが選択された時。"""
+        """キャラクターが選択された時。チャット履歴を完全にリセットする。"""
         try:
+            self.chat_widget.clear_chat()
             char = self.chat_engine.set_character(character_id)
             self.char_name_label.setText(char.name)
+            self.voice_panel.set_current_character(char)
             self.status_bar.showMessage(f"キャラクター変更: {char.name}")
             self._update_status()
         except ValueError as e:
@@ -289,6 +321,34 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error("Failed to save config: %s", e)
 
+    def _on_voice_config_changed(self):
+        """音声パネルの設定変更時に config を保存する。"""
+        self.config["voice"] = self.voice_engine.get_config()
+        self.config["tts"] = self.tts_engine.get_config()
+        try:
+            config_path = Path("config.json")
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error("Failed to save voice config: %s", e)
+
+    def _on_tts_config_changed(self):
+        """TTS 設定変更時に config とキャラクターJSON を保存する。"""
+        self.config["tts"] = self.tts_engine.get_config()
+        try:
+            config_path = Path("config.json")
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error("Failed to save TTS config: %s", e)
+
+        char = self.chat_engine.current_character
+        if char is not None:
+            try:
+                self.character_manager.save_character(char)
+            except Exception as e:
+                logger.error("Failed to save character TTS config: %s", e)
+
     def _on_about(self):
         """アプリ情報ダイアログ。"""
         QMessageBox.about(
@@ -323,4 +383,6 @@ class MainWindow(QMainWindow):
         """アプリ終了時にモデルをアンロード。"""
         if self.model_loader.is_loaded:
             self.model_loader.unload_model()
+        self.voice_engine.unload_model()
+        self.tts_engine.unload_all()
         event.accept()

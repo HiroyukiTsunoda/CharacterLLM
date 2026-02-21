@@ -56,6 +56,58 @@ class HFModelEntry:
 # ---------------------------------------------------------------------------
 
 RECOMMENDED_MODELS: list[HFModelEntry] = [
+    # --- GPT-OSS Swallow (日本語強化GPT-OSS・MoE 21B総/3.6Bアクティブ・analysis channel) ---
+    HFModelEntry(
+        repo_id="mmnga-o/GPT-OSS-Swallow-20B-RL-v0.1-gguf",
+        filename="GPT-OSS-Swallow-20B-RL-v0.1-Q4_K_M.gguf",
+        display_name="GPT-OSS-Swallow-20B-RL (Q4_K_M) [完全版]",
+        estimated_vram_gb=16.5,
+        supports_thinking=True,
+    ),
+    HFModelEntry(
+        repo_id="mmnga-o/GPT-OSS-Swallow-20B-RL-v0.1-gguf",
+        filename="GPT-OSS-Swallow-20B-RL-v0.1-Q5_K_M.gguf",
+        display_name="GPT-OSS-Swallow-20B-RL (Q5_K_M) [完全版]",
+        estimated_vram_gb=17.5,
+        supports_thinking=True,
+    ),
+    # --- Nemotron Nano 9B v2 Japanese (NVIDIA・Mamba2ハイブリッド・日本語特化・thinking対応) ---
+    HFModelEntry(
+        repo_id="mmnga-o/NVIDIA-Nemotron-Nano-9B-v2-Japanese-gguf",
+        filename="NVIDIA-Nemotron-Nano-9B-v2-Japanese-Q4_K_M.gguf",
+        display_name="Nemotron-Nano-9B-v2-JP (Q4_K_M)",
+        estimated_vram_gb=7.0,
+        supports_thinking=True,
+    ),
+    HFModelEntry(
+        repo_id="mmnga-o/NVIDIA-Nemotron-Nano-9B-v2-Japanese-gguf",
+        filename="NVIDIA-Nemotron-Nano-9B-v2-Japanese-Q8_0.gguf",
+        display_name="Nemotron-Nano-9B-v2-JP (Q8_0)",
+        estimated_vram_gb=10.0,
+        supports_thinking=True,
+    ),
+    # --- Qwen3 Swallow (日本語強化Qwen3・thinking対応) ---
+    HFModelEntry(
+        repo_id="mmnga-o/Qwen3-Swallow-8B-SFT-v0.2-gguf",
+        filename="Qwen3-Swallow-8B-SFT-v0.2-Q4_K_M.gguf",
+        display_name="Qwen3-Swallow-8B-SFT (Q4_K_M)",
+        estimated_vram_gb=5.5,
+        supports_thinking=True,
+    ),
+    HFModelEntry(
+        repo_id="mmnga-o/Qwen3-Swallow-8B-SFT-v0.2-gguf",
+        filename="Qwen3-Swallow-8B-SFT-v0.2-Q8_0.gguf",
+        display_name="Qwen3-Swallow-8B-SFT (Q8_0)",
+        estimated_vram_gb=9.5,
+        supports_thinking=True,
+    ),
+    HFModelEntry(
+        repo_id="mmnga-o/Qwen3-Swallow-30B-A3B-SFT-v0.2-gguf",
+        filename="Qwen3-Swallow-30B-A3B-SFT-v0.2-Q4_K_M.gguf",
+        display_name="Qwen3-Swallow-30B-A3B-SFT MoE (Q4_K_M)",
+        estimated_vram_gb=19.0,
+        supports_thinking=True,
+    ),
     # --- Qwen3 (日本語最強・thinking対応) ---
     HFModelEntry(
         repo_id="Qwen/Qwen3-8B-GGUF",
@@ -76,6 +128,14 @@ RECOMMENDED_MODELS: list[HFModelEntry] = [
         filename="Qwen3-32B-Q4_K_M.gguf",
         display_name="Qwen3-32B (Q4_K_M)",
         estimated_vram_gb=20.5,
+        supports_thinking=True,
+    ),
+    # --- Qwen3-30B-A3B (MoE Shallow・30B総パラメータ/3.3Bアクティブ・VRAM効率◎) ---
+    HFModelEntry(
+        repo_id="Qwen/Qwen3-30B-A3B-GGUF",
+        filename="Qwen3-30B-A3B-Q4_K_M.gguf",
+        display_name="Qwen3-30B-A3B MoE (Q4_K_M)",
+        estimated_vram_gb=18.0,
         supports_thinking=True,
     ),
     # --- Gemma 3 (日本語◎・感情表現が豊か・プロンプトで<think>誘導) ---
@@ -99,6 +159,13 @@ RECOMMENDED_MODELS: list[HFModelEntry] = [
         filename="gpt-oss-20b-Q4_K_M.gguf",
         display_name="GPT-OSS-20B (Q4_K_M)",
         estimated_vram_gb=12.0,
+        supports_thinking=True,
+    ),
+    HFModelEntry(
+        repo_id="unsloth/gpt-oss-20b-GGUF",
+        filename="gpt-oss-20b-Q6_K.gguf",
+        display_name="GPT-OSS-20B (Q6_K)",
+        estimated_vram_gb=12.5,
         supports_thinking=True,
     ),
     HFModelEntry(
@@ -153,6 +220,7 @@ class ModelLoader:
         self._current_model_path: Optional[str] = None
         self._supports_thinking: bool = False
         self._uses_think_tags: bool = False
+        self._template_inserts_think: bool = False
 
     # ------------------------------------------------------------------
     # プロパティ
@@ -180,6 +248,11 @@ class ModelLoader:
     def uses_think_tags(self) -> bool:
         """ロード中のモデルが <think> ブロックを使用するか（ネイティブまたはプロンプト誘導）。"""
         return self._uses_think_tags
+
+    @property
+    def template_inserts_think(self) -> bool:
+        """ロード中のモデルのチャットテンプレートが <think> を自動挿入するか。"""
+        return self._template_inserts_think
 
     # ------------------------------------------------------------------
     # ローカルモデル一覧
@@ -225,11 +298,17 @@ class ModelLoader:
         inf_cfg = self.config.get("inference", {})
         n_ctx = inf_cfg.get("context_length", n_ctx)
 
-        logger.info("Loading model: %s (n_ctx=%d, n_gpu_layers=%d)", model_path, n_ctx, n_gpu_layers)
+        n_batch = inf_cfg.get("n_batch", n_ctx)
+
+        logger.info(
+            "Loading model: %s (n_ctx=%d, n_batch=%d, n_gpu_layers=%d)",
+            model_path, n_ctx, n_batch, n_gpu_layers,
+        )
 
         self._model = Llama(
             model_path=model_path,
             n_ctx=n_ctx,
+            n_batch=n_batch,
             n_gpu_layers=n_gpu_layers,
             main_gpu=main_gpu,
             verbose=False,
@@ -239,9 +318,11 @@ class ModelLoader:
         self._supports_thinking = self._detect_thinking_support(model_path)
         filename_lower = Path(model_path).name.lower()
         self._uses_think_tags = self._supports_thinking and "gpt-oss" not in filename_lower
+        self._template_inserts_think = self._detect_template_think_insertion()
         logger.info(
-            "Model loaded successfully: %s (thinking=%s, think_tags=%s)",
+            "Model loaded successfully: %s (thinking=%s, think_tags=%s, template_think=%s)",
             model_path, self._supports_thinking, self._uses_think_tags,
+            self._template_inserts_think,
         )
         return self._model
 
@@ -254,7 +335,21 @@ class ModelLoader:
             self._current_model_path = None
             self._supports_thinking = False
             self._uses_think_tags = False
+            self._template_inserts_think = False
             gc.collect()
+
+    def _detect_template_think_insertion(self) -> bool:
+        """モデルのチャットテンプレートに <think> 自動挿入が含まれるか検出する。"""
+        if self._model is None:
+            return False
+        try:
+            template = self._model.metadata.get("tokenizer.chat_template", "")
+            if "<think>" in template:
+                logger.info("Chat template contains <think> auto-insertion.")
+                return True
+        except Exception:
+            pass
+        return False
 
     @staticmethod
     def _detect_thinking_support(model_path: str) -> bool:
@@ -267,11 +362,29 @@ class ModelLoader:
         for entry in RECOMMENDED_MODELS:
             if entry.filename.lower() == filename:
                 return entry.supports_thinking
-        return any(kw in filename for kw in ("qwen", "gemma", "gpt-oss"))
+        return any(kw in filename for kw in ("qwen", "gemma", "gpt-oss", "swallow", "nemotron"))
 
     # ------------------------------------------------------------------
     # 推論
     # ------------------------------------------------------------------
+
+    def _reset_state(self) -> None:
+        """モデルの内部状態を完全にリセットする。
+
+        Mamba2/Transformer ハイブリッドモデルでは、llama-cpp-python の
+        プレフィックスキャッシュが再帰状態と干渉し 2 回目以降の推論で
+        llama_decode エラーが発生する。明示的リセットで回避する。
+        """
+        try:
+            self._model.reset()
+        except AttributeError:
+            try:
+                if hasattr(self._model, "n_tokens"):
+                    self._model.n_tokens = 0
+                if hasattr(self._model, "_ctx"):
+                    self._model._ctx.kv_cache_clear()
+            except Exception:
+                pass
 
     def generate(
         self,
@@ -285,6 +398,8 @@ class ModelLoader:
         """チャット形式で推論を実行。stream=Trueならトークンを逐次yieldする。"""
         if self._model is None:
             raise RuntimeError("モデルがロードされていません。先にモデルを読み込んでください。")
+
+        self._reset_state()
 
         if stream:
             return self._generate_stream(messages, temperature, top_p, max_tokens, repeat_penalty)
@@ -319,6 +434,7 @@ class ModelLoader:
             delta = chunk["choices"][0].get("delta", {})
             content = delta.get("content", "")
             if content:
+                logger.debug("token: %r", content)
                 yield content
 
     # ------------------------------------------------------------------
