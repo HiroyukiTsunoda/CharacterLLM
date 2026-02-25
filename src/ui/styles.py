@@ -178,6 +178,7 @@ QTabBar::tab {{
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
     margin-right: 2px;
+    outline: none;
 }}
 QTabBar::tab:selected {{
     background-color: {COLORS['bg_light']};

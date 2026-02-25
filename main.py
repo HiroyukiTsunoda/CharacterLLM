@@ -12,6 +12,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # llama-cpp-python (ggml) と PyTorch が同一 GPU 上で非同期 CUDA カーネルを
 # 実行すると cuBLAS ハンドルが競合する。全カーネルを同期実行にして回避する。
 # CUDA ライブラリがロードされる前に設定する必要がある。
@@ -121,6 +123,10 @@ def load_config(config_path: str = "config.json") -> dict:
             "auto_play": True,
             "bert_model": "ku-nlp/deberta-v2-large-japanese-char-wwm",
         },
+        "openai": {
+            "model": "gpt-4o",
+            "enabled": False,
+        },
     }
 
     # デフォルト設定を保存
@@ -139,6 +145,7 @@ def main():
     # 作業ディレクトリをスクリプトのあるディレクトリに変更
     os.chdir(Path(__file__).parent)
 
+    load_dotenv()
     setup_logging()
     logger = logging.getLogger(__name__)
     logger.info("CharacterLLM starting...")

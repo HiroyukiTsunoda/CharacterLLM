@@ -11,6 +11,7 @@ from typing import Iterator, Optional
 
 from src.core.character import Character, CharacterManager
 from src.core.model_loader import ModelLoader
+from src.core.openai_provider import OpenAIProvider
 
 logger = logging.getLogger(__name__)
 raw_logger = logging.getLogger("llm_raw")
@@ -43,9 +44,12 @@ class ChatEngine:
         self,
         model_loader: ModelLoader,
         character_manager: CharacterManager,
+        openai_provider: Optional[OpenAIProvider] = None,
     ):
         self.model_loader = model_loader
         self.character_manager = character_manager
+        self.openai_provider = openai_provider or OpenAIProvider()
+        self._use_openai: bool = False
 
         self._current_character: Optional[Character] = None
         self._history: list[ChatMessage] = []
@@ -65,9 +69,24 @@ class ChatEngine:
         return list(self._history)
 
     @property
+    def active_provider(self):
+        """現在アクティブな推論プロバイダーを返す。"""
+        return self.openai_provider if self._use_openai else self.model_loader
+
+    @property
+    def use_openai(self) -> bool:
+        return self._use_openai
+
+    @property
     def is_ready(self) -> bool:
         """モデルとキャラクター両方がセットされているか。"""
-        return self.model_loader.is_loaded and self._current_character is not None
+        return self.active_provider.is_loaded and self._current_character is not None
+
+    def set_use_openai(self, enabled: bool) -> None:
+        """推論バックエンドを切り替える。"""
+        self._use_openai = enabled
+        backend = "OpenAI" if enabled else "Local"
+        logger.info("Inference backend switched to: %s", backend)
 
     # ------------------------------------------------------------------
     # キャラクター操作
@@ -133,7 +152,8 @@ class ChatEngine:
     def _build_messages(self, user_input: str, response_tokens: int = 256) -> list[dict]:
         """LLMに送信するメッセージリストを組み立てる。"""
         messages: list[dict] = []
-        template_think = self.model_loader.template_inserts_think
+        provider = self.active_provider
+        template_think = provider.template_inserts_think
 
         # 1. システムプロンプト（キャラクター + 応答長ガイダンス + <think>タグ指示）
         if self._current_character:
@@ -141,7 +161,7 @@ class ChatEngine:
             guidance = self._LENGTH_GUIDANCE.get(response_tokens, "")
             if guidance:
                 sys_msg["content"] += guidance
-            if self.model_loader.uses_think_tags and not template_think:
+            if provider.uses_think_tags and not template_think:
                 sys_msg["content"] += self._THINK_INSTRUCTION
             messages.append(sys_msg)
 
@@ -657,10 +677,11 @@ class ChatEngine:
         if not self.is_ready:
             raise RuntimeError("モデルまたはキャラクターが設定されていません。")
 
+        provider = self.active_provider
         params = self._current_character.generation_params
         response_tokens = self._estimate_max_tokens(user_input)
         messages = self._build_messages(user_input, response_tokens)
-        think_budget = self._THINK_TOKEN_BUDGET if self.model_loader.supports_thinking else 0
+        think_budget = self._THINK_TOKEN_BUDGET if provider.supports_thinking else 0
         max_tokens = response_tokens + think_budget
 
         logger.debug(
@@ -670,7 +691,7 @@ class ChatEngine:
 
         raw_logger.info("=== User Input ===\n%s\n=== END ===", user_input)
 
-        raw_response = self.model_loader.generate(
+        raw_response = provider.generate(
             messages=messages,
             temperature=params.temperature,
             top_p=params.top_p,
@@ -699,10 +720,11 @@ class ChatEngine:
         if not self.is_ready:
             raise RuntimeError("モデルまたはキャラクターが設定されていません。")
 
+        provider = self.active_provider
         params = self._current_character.generation_params
         response_tokens = self._estimate_max_tokens(user_input)
         messages = self._build_messages(user_input, response_tokens)
-        think_budget = self._THINK_TOKEN_BUDGET if self.model_loader.supports_thinking else 0
+        think_budget = self._THINK_TOKEN_BUDGET if provider.supports_thinking else 0
         max_tokens = response_tokens + think_budget
 
         logger.debug(
@@ -716,7 +738,7 @@ class ChatEngine:
 
         raw_logger.info("=== User Input ===\n%s\n=== END ===", user_input)
 
-        raw_stream = self.model_loader.generate(
+        raw_stream = provider.generate(
             messages=messages,
             temperature=params.temperature,
             top_p=params.top_p,

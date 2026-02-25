@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from src.core.gpu_utils import check_vram_fit, get_primary_gpu_info
 from src.core.model_loader import HFModelEntry, ModelLoader
+from src.core.openai_provider import OpenAIProvider
 from src.ui import install_wheel_guard
 from src.ui.styles import COLORS
 
@@ -88,17 +89,43 @@ class LoadModelWorker(QThread):
 # ModelPanel
 # ---------------------------------------------------------------------------
 
+class OpenAIConnectWorker(QThread):
+    """OpenAI 接続テストを別スレッドで実行。"""
+
+    finished_signal = Signal(str)
+    error_signal = Signal(str)
+
+    def __init__(self, provider: OpenAIProvider, model_id: str, parent=None):
+        super().__init__(parent)
+        self._provider = provider
+        self._model_id = model_id
+
+    def run(self):
+        try:
+            self._provider.connect(self._model_id)
+            result = self._provider.test_connection()
+            self.finished_signal.emit(result)
+        except Exception as e:
+            logger.error("OpenAI connection failed: %s", e)
+            self.error_signal.emit(str(e))
+
+
 class ModelPanel(QWidget):
     """サイドバーに配置するモデル選択・管理パネル。"""
 
     model_loaded = Signal(str)    # model_path
     model_unloaded = Signal()
+    openai_connected = Signal(str)    # model_id
+    openai_disconnected = Signal()
+    engine_changed = Signal(bool)     # True = OpenAI, False = ローカル
 
-    def __init__(self, model_loader: ModelLoader, parent=None):
+    def __init__(self, model_loader: ModelLoader, openai_provider: OpenAIProvider | None = None, parent=None):
         super().__init__(parent)
         self.model_loader = model_loader
+        self.openai_provider = openai_provider or OpenAIProvider()
         self._download_worker = None
         self._load_worker = None
+        self._openai_worker = None
         self._gpu_info: GpuInfo | None = None
         self._refresh_gpu_info()
         self._setup_ui()
@@ -114,6 +141,19 @@ class ModelPanel(QWidget):
         header.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 15px; font-weight: bold;")
         layout.addWidget(header)
 
+        # ---- 推論エンジン選択 ----
+        engine_group = QGroupBox("推論エンジン")
+        engine_layout = QVBoxLayout()
+
+        self.engine_combo = QComboBox()
+        self.engine_combo.addItem("ローカル (GGUF)", "local")
+        self.engine_combo.addItem("OpenAI API (ChatGPT)", "openai")
+        self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
+        engine_layout.addWidget(self.engine_combo)
+
+        engine_group.setLayout(engine_layout)
+        layout.addWidget(engine_group)
+
         # ---- VRAM 情報 ----
         self.vram_label = QLabel()
         self.vram_label.setWordWrap(True)
@@ -127,7 +167,7 @@ class ModelPanel(QWidget):
         layout.addWidget(self.current_model_label)
 
         # ---- ローカルモデル一覧 ----
-        local_group = QGroupBox("ローカルモデル")
+        self.local_group = QGroupBox("ローカルモデル")
         local_layout = QVBoxLayout()
 
         self.model_list = QListWidget()
@@ -157,11 +197,11 @@ class ModelPanel(QWidget):
         model_btn_layout.addWidget(self.refresh_btn)
 
         local_layout.addLayout(model_btn_layout)
-        local_group.setLayout(local_layout)
-        layout.addWidget(local_group)
+        self.local_group.setLayout(local_layout)
+        layout.addWidget(self.local_group)
 
         # ---- ダウンロード ----
-        dl_group = QGroupBox("モデルダウンロード")
+        self.dl_group = QGroupBox("モデルダウンロード")
         dl_layout = QVBoxLayout()
 
         self.dl_combo = QComboBox()
@@ -181,10 +221,62 @@ class ModelPanel(QWidget):
         self.dl_status.setWordWrap(True)
         dl_layout.addWidget(self.dl_status)
 
-        dl_group.setLayout(dl_layout)
-        layout.addWidget(dl_group)
+        self.dl_group.setLayout(dl_layout)
+        layout.addWidget(self.dl_group)
 
         install_wheel_guard(self, self.dl_combo)
+
+        # ---- OpenAI API セクション ----
+        self.openai_group = QGroupBox("OpenAI API")
+        openai_layout = QVBoxLayout()
+
+        # API キー状態
+        self.openai_key_label = QLabel()
+        self.openai_key_label.setWordWrap(True)
+        self._update_openai_key_label()
+        openai_layout.addWidget(self.openai_key_label)
+
+        # モデル選択
+        openai_model_label = QLabel("モデル:")
+        openai_model_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        openai_layout.addWidget(openai_model_label)
+
+        self.openai_model_combo = QComboBox()
+        for entry in OpenAIProvider.get_available_models():
+            self.openai_model_combo.addItem(entry.display_name, entry.model_id)
+        openai_layout.addWidget(self.openai_model_combo)
+
+        # 接続ボタン
+        openai_btn_layout = QHBoxLayout()
+
+        self.openai_connect_btn = QPushButton("接続")
+        self.openai_connect_btn.clicked.connect(self._on_openai_connect)
+        openai_btn_layout.addWidget(self.openai_connect_btn)
+
+        self.openai_disconnect_btn = QPushButton("切断")
+        self.openai_disconnect_btn.setProperty("secondary", True)
+        self.openai_disconnect_btn.clicked.connect(self._on_openai_disconnect)
+        self.openai_disconnect_btn.setEnabled(False)
+        openai_btn_layout.addWidget(self.openai_disconnect_btn)
+
+        self.openai_test_btn = QPushButton("テスト")
+        self.openai_test_btn.setProperty("secondary", True)
+        self.openai_test_btn.clicked.connect(self._on_openai_test)
+        openai_btn_layout.addWidget(self.openai_test_btn)
+
+        openai_layout.addLayout(openai_btn_layout)
+
+        # ステータス
+        self.openai_status = QLabel("")
+        self.openai_status.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        self.openai_status.setWordWrap(True)
+        openai_layout.addWidget(self.openai_status)
+
+        self.openai_group.setLayout(openai_layout)
+        self.openai_group.setVisible(False)
+        layout.addWidget(self.openai_group)
+
+        install_wheel_guard(self, self.openai_model_combo)
 
         layout.addStretch()
 
@@ -407,6 +499,130 @@ class ModelPanel(QWidget):
         self.dl_status.setText(f"エラー: {error}")
         self.dl_status.setStyleSheet(f"color: {COLORS['error']}; font-size: 12px;")
         QMessageBox.critical(self, "ダウンロードエラー", f"ダウンロードに失敗しました:\n{error}")
+
+    # ------------------------------------------------------------------
+    # 推論エンジン切替
+    # ------------------------------------------------------------------
+
+    def _on_engine_changed(self, index: int):
+        """推論エンジンのコンボボックスが変更された時。"""
+        engine = self.engine_combo.currentData()
+        is_openai = engine == "openai"
+
+        self.local_group.setVisible(not is_openai)
+        self.dl_group.setVisible(not is_openai)
+        self.vram_label.setVisible(not is_openai)
+        self.openai_group.setVisible(is_openai)
+
+        if is_openai:
+            if self.openai_provider.is_loaded:
+                model = self.openai_provider.current_model or ""
+                self.current_model_label.setText(f"OpenAI: {model}")
+                self.current_model_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 12px;")
+            else:
+                self.current_model_label.setText("OpenAI 未接続")
+                self.current_model_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        else:
+            if self.model_loader.is_loaded:
+                name = Path(self.model_loader.current_model_path).stem
+                self.current_model_label.setText(f"ロード済み: {name}")
+                self.current_model_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 12px;")
+            else:
+                self.current_model_label.setText("未ロード")
+                self.current_model_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+
+        self.engine_changed.emit(is_openai)
+
+    # ------------------------------------------------------------------
+    # OpenAI API 操作
+    # ------------------------------------------------------------------
+
+    def _update_openai_key_label(self):
+        """API キー状態ラベルを更新。"""
+        if self.openai_provider.api_key_set:
+            self.openai_key_label.setText("APIキー: 設定済み (.env)")
+            self.openai_key_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 12px;")
+        else:
+            self.openai_key_label.setText("APIキー: 未設定\n.env に OPENAI_API_KEY を設定してください")
+            self.openai_key_label.setStyleSheet(f"color: {COLORS['warning']}; font-size: 12px;")
+
+    def _on_openai_connect(self):
+        """OpenAI API に接続する。"""
+        if not self.openai_provider.api_key_set:
+            QMessageBox.warning(
+                self, "APIキー未設定",
+                "OpenAI API キーが設定されていません。\n"
+                ".env ファイルに OPENAI_API_KEY を設定してください。",
+            )
+            return
+
+        model_id = self.openai_model_combo.currentData()
+        if not model_id:
+            return
+
+        self.openai_connect_btn.setEnabled(False)
+        self.openai_connect_btn.setText("接続中...")
+        self.openai_status.setText("接続中...")
+
+        self._openai_worker = OpenAIConnectWorker(self.openai_provider, model_id, self)
+        self._openai_worker.finished_signal.connect(lambda r: self._on_openai_connected(model_id, r))
+        self._openai_worker.error_signal.connect(self._on_openai_connect_error)
+        self._openai_worker.start()
+
+    def _on_openai_connected(self, model_id: str, result: str):
+        """OpenAI 接続完了。"""
+        self.openai_connect_btn.setEnabled(True)
+        self.openai_connect_btn.setText("接続")
+        self.openai_disconnect_btn.setEnabled(True)
+        self.openai_status.setText(result)
+        self.openai_status.setStyleSheet(f"color: {COLORS['success']}; font-size: 12px;")
+        self.current_model_label.setText(f"OpenAI: {model_id}")
+        self.current_model_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 12px;")
+        self.openai_connected.emit(model_id)
+
+    def _on_openai_connect_error(self, error: str):
+        """OpenAI 接続エラー。"""
+        self.openai_connect_btn.setEnabled(True)
+        self.openai_connect_btn.setText("接続")
+        self.openai_status.setText(f"エラー: {error}")
+        self.openai_status.setStyleSheet(f"color: {COLORS['error']}; font-size: 12px;")
+        QMessageBox.critical(self, "OpenAI 接続エラー", f"OpenAI への接続に失敗しました:\n{error}")
+
+    def _on_openai_disconnect(self):
+        """OpenAI API を切断する。"""
+        self.openai_provider.disconnect()
+        self.openai_disconnect_btn.setEnabled(False)
+        self.openai_status.setText("切断しました")
+        self.openai_status.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        self.current_model_label.setText("OpenAI 未接続")
+        self.current_model_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        self.openai_disconnected.emit()
+
+    def _on_openai_test(self):
+        """OpenAI API の接続テスト。"""
+        if not self.openai_provider.api_key_set:
+            QMessageBox.warning(self, "APIキー未設定", "API キーが設定されていません。")
+            return
+
+        self.openai_test_btn.setEnabled(False)
+        self.openai_test_btn.setText("テスト中...")
+        self.openai_status.setText("接続テスト中...")
+
+        model_id = self.openai_model_combo.currentData()
+        worker = OpenAIConnectWorker(self.openai_provider, model_id, self)
+        worker.finished_signal.connect(self._on_openai_test_done)
+        worker.error_signal.connect(self._on_openai_test_done)
+        self._openai_test_worker = worker
+        worker.start()
+
+    def _on_openai_test_done(self, result: str):
+        """接続テスト完了。"""
+        self.openai_test_btn.setEnabled(True)
+        self.openai_test_btn.setText("テスト")
+        is_success = result.startswith("接続成功")
+        color = COLORS['success'] if is_success else COLORS['error']
+        self.openai_status.setText(result)
+        self.openai_status.setStyleSheet(f"color: {color}; font-size: 12px;")
 
     # ------------------------------------------------------------------
     # VRAM 判定ヘルパー

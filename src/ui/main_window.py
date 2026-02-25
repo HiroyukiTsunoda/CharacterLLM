@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from src.core.character import CharacterManager
 from src.core.chat_engine import ChatEngine
 from src.core.model_loader import ModelLoader
+from src.core.openai_provider import OpenAIProvider
 from src.core.tts_model_manager import TTSModelManager
 from src.core.voice_input import VoiceEngine
 from src.core.voice_output import TTSEngine
@@ -52,12 +53,14 @@ class MainWindow(QMainWindow):
             models_dir=config.get("models_dir", "models"),
             config=config,
         )
+        self.openai_provider = OpenAIProvider()
         self.character_manager = CharacterManager(
             characters_dir=config.get("characters_dir", "characters"),
         )
         self.chat_engine = ChatEngine(
             model_loader=self.model_loader,
             character_manager=self.character_manager,
+            openai_provider=self.openai_provider,
         )
         self.voice_engine = VoiceEngine(config=config)
         self.tts_engine = TTSEngine(config=config)
@@ -65,11 +68,23 @@ class MainWindow(QMainWindow):
             models_dir=config.get("tts_models_dir", "tts_models"),
         )
 
+        # config の openai.enabled が True なら起動時に OpenAI モードへ
+        openai_cfg = config.get("openai", {})
+        if openai_cfg.get("enabled", False):
+            self.chat_engine.set_use_openai(True)
+
         self._settings_dialog = None
 
         self._setup_ui()
         self._setup_menu()
         self._connect_signals()
+
+        # 起動時に OpenAI モードが有効なら UI を同期
+        if self.chat_engine.use_openai:
+            idx = self.model_panel.engine_combo.findData("openai")
+            if idx >= 0:
+                self.model_panel.engine_combo.setCurrentIndex(idx)
+
         self._update_status()
 
     # ------------------------------------------------------------------
@@ -137,7 +152,7 @@ class MainWindow(QMainWindow):
         self.sidebar_tabs.addTab(self.character_panel, "キャラクター")
 
         # モデルパネル
-        self.model_panel = ModelPanel(self.model_loader)
+        self.model_panel = ModelPanel(self.model_loader, self.openai_provider)
         self.sidebar_tabs.addTab(self.model_panel, "モデル")
 
         # 音声パネル
@@ -256,6 +271,11 @@ class MainWindow(QMainWindow):
         self.model_panel.model_loaded.connect(self._on_model_loaded)
         self.model_panel.model_unloaded.connect(self._on_model_unloaded)
 
+        # OpenAI 接続/切断
+        self.model_panel.openai_connected.connect(self._on_openai_connected)
+        self.model_panel.openai_disconnected.connect(self._on_openai_disconnected)
+        self.model_panel.engine_changed.connect(self._on_engine_changed)
+
         # 音声設定変更時 → config 保存
         self.voice_panel.config_changed.connect(self._on_voice_config_changed)
 
@@ -294,6 +314,27 @@ class MainWindow(QMainWindow):
         self.model_status_label.setText("モデル未ロード")
         self.model_status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 12px;")
         self.status_bar.showMessage("モデルをアンロードしました")
+        self._update_status()
+
+    def _on_openai_connected(self, model_id: str):
+        """OpenAI に接続された時。"""
+        self.model_status_label.setText(f"OpenAI: {model_id}")
+        self.model_status_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 12px;")
+        self.status_bar.showMessage(f"OpenAI 接続完了: {model_id}")
+        self._update_status()
+
+    def _on_openai_disconnected(self):
+        """OpenAI が切断された時。"""
+        self.model_status_label.setText("OpenAI 未接続")
+        self.model_status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 12px;")
+        self.status_bar.showMessage("OpenAI を切断しました")
+        self._update_status()
+
+    def _on_engine_changed(self, use_openai: bool):
+        """推論エンジンが切り替えられた時。"""
+        self.chat_engine.set_use_openai(use_openai)
+        self.config.setdefault("openai", {})["enabled"] = use_openai
+        self._save_config()
         self._update_status()
 
     def _on_clear_chat(self):
@@ -349,6 +390,15 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.error("Failed to save character TTS config: %s", e)
 
+    def _save_config(self):
+        """config.json に書き戻す。"""
+        try:
+            config_path = Path("config.json")
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error("Failed to save config: %s", e)
+
     def _on_about(self):
         """アプリ情報ダイアログ。"""
         QMessageBox.about(
@@ -357,7 +407,8 @@ class MainWindow(QMainWindow):
             "CharacterLLM v1.0\n\n"
             "キャラクターAIとチャットできるデスクトップアプリケーション。\n\n"
             "GPU推論 (CUDA) 対応\n"
-            "対応モデル: Qwen3, Llama, Mistral 等 (GGUF形式)",
+            "対応モデル: Qwen3, Llama, Mistral 等 (GGUF形式)\n"
+            "OpenAI API (ChatGPT) 対応",
         )
 
     # ------------------------------------------------------------------
@@ -369,7 +420,12 @@ class MainWindow(QMainWindow):
         parts = []
         if self.chat_engine.current_character:
             parts.append(f"キャラクター: {self.chat_engine.current_character.name}")
-        if self.model_loader.is_loaded:
+        if self.chat_engine.use_openai:
+            if self.openai_provider.is_loaded:
+                parts.append(f"OpenAI: {self.openai_provider.current_model}")
+            else:
+                parts.append("OpenAI: 未接続")
+        elif self.model_loader.is_loaded:
             name = Path(self.model_loader.current_model_path).stem
             parts.append(f"モデル: {name}")
         if parts:

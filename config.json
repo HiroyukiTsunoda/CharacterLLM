@@ -32,9 +32,13 @@
     "auto_send": false
   },
   "tts": {
-    "enabled": true,
+    "enabled": false,
     "use_gpu": true,
-    "auto_play": true,
+    "auto_play": false,
     "bert_model": "ku-nlp/deberta-v2-large-japanese-char-wwm"
+  },
+  "openai": {
+    "model": "gpt-4o",
+    "enabled": false
   }
 }
