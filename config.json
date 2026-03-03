@@ -1,7 +1,6 @@
 {
   "models_dir": "models",
   "characters_dir": "characters",
-  "tts_models_dir": "tts_models",
   "database_path": "data/chat_history.db",
   "default_model": null,
   "default_character": "default_assistant",
@@ -24,7 +23,7 @@
   },
   "voice": {
     "input_device": 1,
-    "output_device": 11,
+    "output_device": 6,
     "whisper_model": "medium",
     "device": "cuda",
     "compute_type": "float16",
@@ -35,7 +34,11 @@
     "enabled": false,
     "use_gpu": true,
     "auto_play": false,
-    "bert_model": "ku-nlp/deberta-v2-large-japanese-char-wwm"
+    "qwen3": {
+      "default_model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+      "dtype": "bfloat16",
+      "flash_attention": true
+    }
   },
   "openai": {
     "model": "gpt-4o",

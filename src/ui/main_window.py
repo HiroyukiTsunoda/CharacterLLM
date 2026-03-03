@@ -29,9 +29,8 @@ from src.core.character import CharacterManager
 from src.core.chat_engine import ChatEngine
 from src.core.model_loader import ModelLoader
 from src.core.openai_provider import OpenAIProvider
-from src.core.tts_model_manager import TTSModelManager
+from src.core.tts_router import TTSRouter
 from src.core.voice_input import VoiceEngine
-from src.core.voice_output import TTSEngine
 from src.ui.character_panel import CharacterPanel
 from src.ui.chat_widget import ChatWidget
 from src.ui.model_panel import ModelPanel
@@ -63,10 +62,7 @@ class MainWindow(QMainWindow):
             openai_provider=self.openai_provider,
         )
         self.voice_engine = VoiceEngine(config=config)
-        self.tts_engine = TTSEngine(config=config)
-        self.tts_model_manager = TTSModelManager(
-            models_dir=config.get("tts_models_dir", "tts_models"),
-        )
+        self.tts_engine = TTSRouter(config=config)
 
         # config の openai.enabled が True なら起動時に OpenAI モードへ
         openai_cfg = config.get("openai", {})
@@ -159,7 +155,6 @@ class MainWindow(QMainWindow):
         self.voice_panel = VoicePanel(
             self.voice_engine,
             tts_engine=self.tts_engine,
-            model_manager=self.tts_model_manager,
         )
         self.sidebar_tabs.addTab(self.voice_panel, "音声")
 

@@ -33,7 +33,7 @@
 │  ┌────┴─────┐ ┌─────┴──────┐ ┌──────┴─────────┐  │
 │  │Voice I/O │ │ llama-cpp  │ │    SQLite DB   │  │
 │  │Whisper+  │ │  -python   │ │  (chat_history) │  │
-│  │SBV2 TTS  │ │  (CUDA)    │ │                │  │
+│  │Qwen3 TTS │ │  (CUDA)    │ │                │  │
 │  └──────────┘ └────────────┘ └────────────────┘  │
 └──────────────────────────────────────────────────┘
          ↕              ↕              ↕
@@ -68,11 +68,11 @@ Python 3.12 を推奨する理由:
 
 | 項目 | 詳細 |
 |------|------|
-| 用途 | TTS (Style-Bert-VITS2) 推論、BERTモデル推論 |
+| 用途 | TTS (Qwen3-TTS) 推論 |
 | CUDA版 | cu124 (CUDA 12.4) |
 | インストール | `pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124` |
 
-LLM推論は llama-cpp-python (ggml) が担当するため、PyTorch は TTS 関連でのみ使用されます。同一GPU上で llama-cpp-python と PyTorch が cuBLAS ハンドルを共有することによる競合を、推論前の `torch.cuda.synchronize()` + `torch.cuda.empty_cache()` で回避しています。
+LLM推論は llama-cpp-python (ggml) が担当するため、PyTorch は Qwen3-TTS 関連でのみ使用されます。同一GPU上で llama-cpp-python と PyTorch が cuBLAS ハンドルを共有することによる競合を、推論前の `torch.cuda.synchronize()` + `torch.cuda.empty_cache()` で回避しています。
 
 ---
 
@@ -163,20 +163,28 @@ Llama(
 - **VADフィルタ**: 500ms 以上の無音区間で自動分割
 - **ビームサーチ**: beam_size=5
 
-### 音声出力: Style-Bert-VITS2
+### 音声出力: Qwen3-TTS
 
 | 項目 | 詳細 |
 |------|------|
-| ライブラリ | [Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2) |
-| BERTモデル | ku-nlp/deberta-v2-large-japanese-char-wwm |
-| 出力形式 | int16 PCM (44.1kHz) |
+| ライブラリ | [qwen-tts](https://pypi.org/project/qwen-tts/) (Alibaba Qwen) |
+| モデル | Qwen3-TTS-12Hz-0.6B-Base 等 |
+| 出力形式 | int16 PCM |
 | GPU対応 | CUDA |
+
+#### 動作モード
+
+| モード | 説明 |
+|--------|------|
+| CustomVoice | 事前定義スピーカー (Vivian 等) + instruct テキスト |
+| VoiceDesign | テキスト記述のみで声質を設計 |
+| Base | 参照音声による音声クローン |
 
 #### 処理フロー
 
 ```
-テキスト → クリーニング → ト書き解析 → 文分割 → BERT埋め込み → TTS推論 → sounddevice
-         (Markdown除去等)  (感情抽出)  (100文字単位)             (GPU)     (再生)
+テキスト → クリーニング → ト書き解析 → Qwen3TTSModel.generate_* → sounddevice
+         (Markdown除去等)  (instruct生成)                          (再生)
 ```
 
 #### テキストクリーニング
@@ -191,27 +199,13 @@ TTS に渡す前に以下の処理を行います。
 
 #### ト書き（演出指示）システム
 
-括弧内のキーワードを正規表現で検出し、TTS パラメータを動的にオーバーライドします。
-
-```python
-_STAGE_DIR_RE = re.compile(r'[（(]([^）)]+)[）)]')
-```
-
-プリセット例:
-- **小声系**: noise=0.3, noise_w=0.4, length=1.2（静かでゆっくり）
-- **叫び系**: style=Angry, noise=0.9, length=0.85（力強く速い）
-- **感情系**: style=Happy/Sad/Angry 等、style_weight=7.0〜8.0
+括弧内のキーワードを正規表現で検出し、Qwen3-TTS の instruct パラメータに変換します。
 
 #### モデルキャッシュ
 
-キャラクターIDをキーに TTSModel インスタンスをメモリにキャッシュし、キャラクター切替時の再読み込みを回避します。GPU設定変更時はキャッシュを自動クリアします。
-
-#### dtype問題の対策
-
-Style-Bert-VITS2 の safetensors モデルが float16 で保存されている場合、float32 のバイアスとの dtype 不一致で CUDA assert が発生します。対策として:
-
-- BERTモデルを `float()` で明示的に float32 に変換
-- TTS ネットワーク (`net_g`) も float32 に変換
+- モデルは HuggingFace Hub キャッシュに保存され、2回目以降はネットワーク通信なしでロード
+- キャラクターIDをキーにモデルインスタンスをメモリにキャッシュし、再読み込みを回避
+- GPU設定変更時はキャッシュを自動クリア
 
 ### オーディオデバイス管理
 
@@ -322,7 +316,7 @@ JSON ファイルベース（`characters/` ディレクトリ）。
 | setuptools | `<75` | ビルドツール |
 | faster-whisper | (最新) | 音声認識 (STT) |
 | sounddevice | (最新) | オーディオ入出力 |
-| style-bert-vits2 | (最新) | 音声合成 (TTS) |
+| qwen-tts | (最新) | 音声合成 (TTS) |
 
 ### 別途インストール
 
@@ -354,8 +348,10 @@ JSON ファイルベース（`characters/` ディレクトリ）。
 | `model_loader.py` | GGUFモデル読み込み・アンロード・生成 | `ModelLoader`, `ModelInfo`, `HFModelEntry` |
 | `gpu_utils.py` | NVML経由のGPU VRAM情報取得 | ユーティリティ関数 |
 | `voice_input.py` | マイク録音・Whisper音声認識 | `VoiceEngine`, `AudioDevice` |
-| `voice_output.py` | Style-Bert-VITS2 音声合成・再生 | `TTSEngine`, `TTSStyleOverride` |
-| `tts_model_manager.py` | TTSモデルの検出・管理 | `TTSModelManager` |
+| `qwen3_tts_engine.py` | Qwen3-TTS 音声合成 | `Qwen3TTSEngine` |
+| `tts_base.py` | TTS エンジン抽象基底 | `TTSEngineBase` |
+| `tts_router.py` | TTS ルーター | `TTSRouter` |
+| `qwen3_tts_model_manager.py` | Qwen3-TTS モデル管理 | `Qwen3TTSModelManager` |
 
 ### スレッディングモデル
 

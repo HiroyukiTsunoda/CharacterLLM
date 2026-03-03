@@ -20,6 +20,9 @@ tts_models/
 # Logs
 logs/*.log
 
+# Build temp
+_build_llama_cpp_python/
+
 # IDE
 .cursor/
 

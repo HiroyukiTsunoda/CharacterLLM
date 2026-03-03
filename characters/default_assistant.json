@@ -16,15 +16,12 @@
   },
   "tts": {
     "enabled": false,
-    "model_path": "tts_models\\jvnv-M2-jp\\jvnv-M2-jp_e159_s17000.safetensors",
-    "config_path": "tts_models\\jvnv-M2-jp\\config.json",
-    "style_vec_path": "tts_models\\jvnv-M2-jp\\style_vectors.npy",
-    "style": "Neutral",
-    "speaker_id": 0,
-    "sdp_ratio": 0.0,
-    "noise": 0.6,
-    "noise_w": 0.8,
-    "length": 0.95,
-    "style_weight": 5.0
+    "engine": "qwen3",
+    "qwen3_model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "qwen3_mode": "voice_design",
+    "qwen3_voice": "",
+    "qwen3_instructions": "落ち着いた誠実な男性",
+    "qwen3_ref_audio": "",
+    "qwen3_ref_text": ""
   }
 }

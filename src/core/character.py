@@ -85,48 +85,41 @@ class GenerationParams:
 
 @dataclass
 class TTSParams:
-    """キャラクターごとの Style-Bert-VITS2 音声合成パラメータ。"""
+    """キャラクターごとの音声合成パラメータ (Qwen3-TTS)。"""
     enabled: bool = False
-    model_path: str = ""
-    config_path: str = ""
-    style_vec_path: str = ""
-    style: str = "Neutral"
-    speaker_id: int = 0
-    sdp_ratio: float = 0.2
-    noise: float = 0.6
-    noise_w: float = 0.8
-    length: float = 1.0
-    style_weight: float = 5.0
+    engine: str = "qwen3"
+
+    # --- Qwen3-TTS ---
+    qwen3_model: str = ""
+    qwen3_mode: str = "custom_voice"
+    qwen3_voice: str = ""
+    qwen3_instructions: str = ""
+    qwen3_ref_audio: str = ""
+    qwen3_ref_text: str = ""
 
     def to_dict(self) -> dict:
         return {
             "enabled": self.enabled,
-            "model_path": self.model_path,
-            "config_path": self.config_path,
-            "style_vec_path": self.style_vec_path,
-            "style": self.style,
-            "speaker_id": self.speaker_id,
-            "sdp_ratio": self.sdp_ratio,
-            "noise": self.noise,
-            "noise_w": self.noise_w,
-            "length": self.length,
-            "style_weight": self.style_weight,
+            "engine": self.engine,
+            "qwen3_model": self.qwen3_model,
+            "qwen3_mode": self.qwen3_mode,
+            "qwen3_voice": self.qwen3_voice,
+            "qwen3_instructions": self.qwen3_instructions,
+            "qwen3_ref_audio": self.qwen3_ref_audio,
+            "qwen3_ref_text": self.qwen3_ref_text,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> TTSParams:
         return cls(
             enabled=data.get("enabled", False),
-            model_path=data.get("model_path", ""),
-            config_path=data.get("config_path", ""),
-            style_vec_path=data.get("style_vec_path", ""),
-            style=data.get("style", "Neutral"),
-            speaker_id=data.get("speaker_id", 0),
-            sdp_ratio=data.get("sdp_ratio", 0.2),
-            noise=data.get("noise", 0.6),
-            noise_w=data.get("noise_w", 0.8),
-            length=data.get("length", 1.0),
-            style_weight=data.get("style_weight", 5.0),
+            engine=data.get("engine", "qwen3"),
+            qwen3_model=data.get("qwen3_model", ""),
+            qwen3_mode=data.get("qwen3_mode", "custom_voice"),
+            qwen3_voice=data.get("qwen3_voice", ""),
+            qwen3_instructions=data.get("qwen3_instructions", ""),
+            qwen3_ref_audio=data.get("qwen3_ref_audio", ""),
+            qwen3_ref_text=data.get("qwen3_ref_text", ""),
         )
 
 

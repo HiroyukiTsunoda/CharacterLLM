@@ -4,7 +4,7 @@ huggingface-hub>=0.25.0
 setuptools<75
 faster-whisper
 sounddevice
-style-bert-vits2
+qwen-tts
 openai>=1.0.0
 python-dotenv>=1.0.0
 # llama-cpp-python は Start.cmd で CUDA版を直接インストール (requirements.txtでは管理しない)

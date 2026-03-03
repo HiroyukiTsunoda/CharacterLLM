@@ -1,6 +1,6 @@
 """
 VoicePanel: サイドバー「音声」タブ。入力/出力デバイス選択、Whisper 設定、
-Style-Bert-VITS2 TTS 設定（モデルダウンロード・ロード/アンロード含む）を提供する。
+TTS 設定（Qwen3-TTS）を提供する。
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -21,14 +22,13 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSpinBox,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from src.core.voice_input import VoiceEngine
-from src.core.voice_output import TTSEngine
-from src.core.tts_model_manager import TTSModelManager
+from src.core.tts_base import TTSEngineBase
 from src.ui import install_wheel_guard
 from src.ui.styles import COLORS
 
@@ -74,48 +74,12 @@ class WhisperLoadWorker(QThread):
             self.error_signal.emit(str(e))
 
 
-class BERTLoadWorker(QThread):
-    finished_signal = Signal()
-    error_signal = Signal(str)
-
-    def __init__(self, tts_engine: TTSEngine, parent=None):
-        super().__init__(parent)
-        self._tts_engine = tts_engine
-
-    def run(self):
-        try:
-            self._tts_engine.load_bert()
-            self.finished_signal.emit()
-        except Exception as e:
-            logger.error("BERT model load failed: %s", e)
-            self.error_signal.emit(str(e))
-
-
-class TTSModelDownloadWorker(QThread):
-    """HuggingFace からの TTS モデルダウンロードを別スレッドで実行する。"""
-    finished_signal = Signal(str)
-    error_signal = Signal(str)
-
-    def __init__(self, model_manager: TTSModelManager, model_id: str, parent=None):
-        super().__init__(parent)
-        self._mgr = model_manager
-        self._model_id = model_id
-
-    def run(self):
-        try:
-            self._mgr.download_model(self._model_id)
-            self.finished_signal.emit(self._model_id)
-        except Exception as e:
-            logger.error("TTS model download failed: %s", e)
-            self.error_signal.emit(str(e))
-
-
 class TTSLoadWorker(QThread):
     """キャラクターの TTS モデルをメモリにロードする。"""
     finished_signal = Signal()
     error_signal = Signal(str)
 
-    def __init__(self, tts_engine: TTSEngine, character, parent=None):
+    def __init__(self, tts_engine: TTSEngineBase, character, parent=None):
         super().__init__(parent)
         self._tts_engine = tts_engine
         self._character = character
@@ -167,17 +131,13 @@ class VoicePanel(QWidget):
     def __init__(
         self,
         voice_engine: VoiceEngine,
-        tts_engine: TTSEngine | None = None,
-        model_manager: TTSModelManager | None = None,
+        tts_engine: TTSEngineBase | None = None,
         parent=None,
     ):
         super().__init__(parent)
         self._voice_engine = voice_engine
         self._tts_engine = tts_engine
-        self._model_manager = model_manager
         self._load_worker: WhisperLoadWorker | None = None
-        self._bert_worker: BERTLoadWorker | None = None
-        self._dl_worker: TTSModelDownloadWorker | None = None
         self._tts_load_worker: TTSLoadWorker | None = None
         self._tts_test_worker: TTSTestWorker | None = None
         self._current_character = None
@@ -188,7 +148,6 @@ class VoicePanel(QWidget):
         if self._tts_engine:
             self._load_tts_from_engine()
             self._update_tts_status()
-        self._refresh_model_combo()
 
     # ------------------------------------------------------------------
     # 外部 API
@@ -216,18 +175,12 @@ class VoicePanel(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(12)
 
-        # ---- 入力デバイス ----
         self._build_input_device_ui(layout)
-        # ---- 出力デバイス ----
         self._build_output_device_ui(layout)
-        # ---- Whisper ----
         self._build_whisper_ui(layout)
-        # ---- TTS グローバル ----
         self._build_tts_global_ui(layout)
-        # ---- キャラクター別 TTS ----
         self._build_tts_char_ui(layout)
 
-        # ---- ステータス ----
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
         self.status_label.setWordWrap(True)
@@ -240,10 +193,7 @@ class VoicePanel(QWidget):
             self.input_combo, self.output_combo,
             self.model_combo, self.device_combo,
             self.tts_device_combo,
-            self.tts_model_select_combo,
-            self.tts_speaker_id_spin, self.tts_length_spin,
-            self.tts_sdp_spin, self.tts_noise_spin,
-            self.tts_noisew_spin, self.tts_style_weight_spin,
+            self.qwen3_model_combo,
         )
 
         scroll.setWidget(container)
@@ -339,7 +289,7 @@ class VoicePanel(QWidget):
     # ---- TTS グローバル ----
 
     def _build_tts_global_ui(self, layout):
-        grp = QGroupBox("音声合成 (Style-Bert-VITS2)")
+        grp = QGroupBox("音声合成 (Qwen3-TTS)")
         fl = QFormLayout()
         fl.setSpacing(8)
 
@@ -358,21 +308,12 @@ class VoicePanel(QWidget):
         fl.addRow("デバイス:", self.tts_device_combo)
 
         bl = QHBoxLayout()
-        self.bert_load_btn = QPushButton("BERTロード")
-        self.bert_load_btn.setToolTip("SBV2 用 BERT モデルをロード（初回はダウンロード）")
-        self.bert_load_btn.clicked.connect(self._on_bert_load)
-        bl.addWidget(self.bert_load_btn)
-        self.bert_unload_btn = QPushButton("全モデル解放")
-        self.bert_unload_btn.setProperty("secondary", True)
-        self.bert_unload_btn.clicked.connect(self._on_tts_unload_all)
-        self.bert_unload_btn.setEnabled(False)
-        bl.addWidget(self.bert_unload_btn)
+        self.tts_unload_btn = QPushButton("全モデル解放")
+        self.tts_unload_btn.setProperty("secondary", True)
+        self.tts_unload_btn.clicked.connect(self._on_tts_unload_all)
+        self.tts_unload_btn.setEnabled(False)
+        bl.addWidget(self.tts_unload_btn)
         fl.addRow(bl)
-
-        self.bert_progress = QProgressBar()
-        self.bert_progress.setRange(0, 0)
-        self.bert_progress.setVisible(False)
-        fl.addRow(self.bert_progress)
 
         self.tts_status_label = QLabel("無効")
         self.tts_status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
@@ -397,13 +338,50 @@ class VoicePanel(QWidget):
         self.tts_char_enabled_check.toggled.connect(self._on_char_tts_toggled)
         fl.addRow(self.tts_char_enabled_check)
 
-        # モデル選択ドロップダウン
-        self.tts_model_select_combo = QComboBox()
-        self.tts_model_select_combo.setToolTip("ダウンロード済みモデルから選択")
-        self.tts_model_select_combo.currentIndexChanged.connect(self._on_model_selected)
-        fl.addRow("TTSモデル:", self.tts_model_select_combo)
+        # Qwen3-TTS パラメータ
+        self.qwen3_model_combo = QComboBox()
+        self.qwen3_model_combo.setToolTip("Qwen3-TTS モデルバリアントを選択")
+        self.qwen3_model_combo.currentIndexChanged.connect(self._on_qwen3_model_selected)
+        fl.addRow("モデル:", self.qwen3_model_combo)
 
-        # ロード / アンロード
+        self.qwen3_mode_label = QLabel("—")
+        self.qwen3_mode_label.setStyleSheet(
+            f"color: {COLORS['text_secondary']}; font-size: 11px;"
+        )
+        fl.addRow("モード:", self.qwen3_mode_label)
+
+        self.qwen3_voice_edit = QLineEdit()
+        self.qwen3_voice_edit.setPlaceholderText("vivian")
+        self.qwen3_voice_edit.setToolTip("CustomVoice 用スピーカー名")
+        self.qwen3_voice_edit.editingFinished.connect(self._on_qwen3_params_changed)
+        fl.addRow("ボイス名:", self.qwen3_voice_edit)
+
+        self.qwen3_instructions_edit = QTextEdit()
+        self.qwen3_instructions_edit.setPlaceholderText("例: 優しい声でゆっくり話して")
+        self.qwen3_instructions_edit.setToolTip("感情・スタイル指示テキスト")
+        self.qwen3_instructions_edit.setMaximumHeight(60)
+        self.qwen3_instructions_edit.textChanged.connect(self._on_qwen3_params_changed)
+        fl.addRow("指示:", self.qwen3_instructions_edit)
+
+        # 音声クローン用
+        self.qwen3_ref_audio_label = QLabel("参照音声:")
+        ref_bl = QHBoxLayout()
+        self.qwen3_ref_audio_edit = QLineEdit()
+        self.qwen3_ref_audio_edit.setPlaceholderText("参照音声ファイルパス (.wav)")
+        self.qwen3_ref_audio_edit.editingFinished.connect(self._on_qwen3_params_changed)
+        ref_bl.addWidget(self.qwen3_ref_audio_edit)
+        self.qwen3_ref_audio_btn = QPushButton("...")
+        self.qwen3_ref_audio_btn.setMaximumWidth(30)
+        self.qwen3_ref_audio_btn.clicked.connect(self._on_qwen3_browse_ref_audio)
+        ref_bl.addWidget(self.qwen3_ref_audio_btn)
+        fl.addRow(self.qwen3_ref_audio_label, ref_bl)
+
+        self.qwen3_ref_text_edit = QLineEdit()
+        self.qwen3_ref_text_edit.setPlaceholderText("参照音声のテキスト")
+        self.qwen3_ref_text_edit.editingFinished.connect(self._on_qwen3_params_changed)
+        fl.addRow("参照テキスト:", self.qwen3_ref_text_edit)
+
+        # ロード / アンロード / ステータス / テスト
         load_bl = QHBoxLayout()
         self.tts_char_load_btn = QPushButton("メモリにロード")
         self.tts_char_load_btn.setToolTip("このキャラクターの TTS モデルを GPU/CPU メモリにロード")
@@ -427,60 +405,6 @@ class VoicePanel(QWidget):
         self.tts_char_status_label.setWordWrap(True)
         fl.addRow("状態:", self.tts_char_status_label)
 
-        # スタイル
-        self.tts_style_edit = QLineEdit("Neutral")
-        self.tts_style_edit.setToolTip("スタイル名 (例: Neutral, Happy, Sad)")
-        self.tts_style_edit.editingFinished.connect(self._on_char_tts_params_changed)
-        fl.addRow("スタイル:", self.tts_style_edit)
-
-        # speaker_id
-        self.tts_speaker_id_spin = QSpinBox()
-        self.tts_speaker_id_spin.setRange(0, 99)
-        self.tts_speaker_id_spin.valueChanged.connect(self._on_char_tts_params_changed)
-        fl.addRow("話者ID:", self.tts_speaker_id_spin)
-
-        # 話速
-        self.tts_length_spin = QDoubleSpinBox()
-        self.tts_length_spin.setRange(0.1, 5.0)
-        self.tts_length_spin.setSingleStep(0.05)
-        self.tts_length_spin.setValue(1.0)
-        self.tts_length_spin.setToolTip("話速 (1.0=標準、大きいほどゆっくり)")
-        self.tts_length_spin.valueChanged.connect(self._on_char_tts_params_changed)
-        fl.addRow("話速:", self.tts_length_spin)
-
-        # sdp_ratio
-        self.tts_sdp_spin = QDoubleSpinBox()
-        self.tts_sdp_spin.setRange(0.0, 1.0)
-        self.tts_sdp_spin.setSingleStep(0.05)
-        self.tts_sdp_spin.setValue(0.2)
-        self.tts_sdp_spin.valueChanged.connect(self._on_char_tts_params_changed)
-        fl.addRow("SDP Ratio:", self.tts_sdp_spin)
-
-        # noise
-        self.tts_noise_spin = QDoubleSpinBox()
-        self.tts_noise_spin.setRange(0.0, 2.0)
-        self.tts_noise_spin.setSingleStep(0.05)
-        self.tts_noise_spin.setValue(0.6)
-        self.tts_noise_spin.valueChanged.connect(self._on_char_tts_params_changed)
-        fl.addRow("Noise:", self.tts_noise_spin)
-
-        # noise_w
-        self.tts_noisew_spin = QDoubleSpinBox()
-        self.tts_noisew_spin.setRange(0.0, 2.0)
-        self.tts_noisew_spin.setSingleStep(0.05)
-        self.tts_noisew_spin.setValue(0.8)
-        self.tts_noisew_spin.valueChanged.connect(self._on_char_tts_params_changed)
-        fl.addRow("Noise W:", self.tts_noisew_spin)
-
-        # style_weight
-        self.tts_style_weight_spin = QDoubleSpinBox()
-        self.tts_style_weight_spin.setRange(0.0, 50.0)
-        self.tts_style_weight_spin.setSingleStep(0.5)
-        self.tts_style_weight_spin.setValue(5.0)
-        self.tts_style_weight_spin.valueChanged.connect(self._on_char_tts_params_changed)
-        fl.addRow("Style Weight:", self.tts_style_weight_spin)
-
-        # テスト発話
         tbl = QHBoxLayout()
         self.tts_test_btn = QPushButton("テスト発話")
         self.tts_test_btn.clicked.connect(self._on_tts_test)
@@ -495,20 +419,101 @@ class VoicePanel(QWidget):
         grp.setLayout(fl)
         layout.addWidget(grp)
 
+        self._populate_qwen3_model_combo()
+        self._update_qwen3_mode_visibility()
+
     # ==================================================================
-    # モデル選択コンボの更新
+    # Qwen3-TTS モデルコンボ
     # ==================================================================
 
-    def _refresh_model_combo(self):
-        """キャラクター TTS モデル選択ドロップダウンを更新する（全モデル表示）。"""
-        self.tts_model_select_combo.blockSignals(True)
-        self.tts_model_select_combo.clear()
-        self.tts_model_select_combo.addItem("(未設定)", "")
-        if self._model_manager:
-            for info in self._model_manager.list_downloadable():
-                suffix = " DL済" if info["downloaded"] else ""
-                self.tts_model_select_combo.addItem(f'{info["name"]}{suffix}', info["id"])
-        self.tts_model_select_combo.blockSignals(False)
+    _MODE_DISPLAY: dict[str, str] = {
+        "custom_voice": "CustomVoice (事前定義スピーカー)",
+        "voice_design": "VoiceDesign (テキスト記述)",
+        "base": "Base (音声クローン)",
+    }
+
+    @staticmethod
+    def _get_mode_for_repo(repo_id: str) -> str:
+        """repo_id からモデルがサポートするモードを返す。"""
+        try:
+            from src.core.qwen3_tts_model_manager import Qwen3TTSModelManager
+            info = Qwen3TTSModelManager().get_model_by_repo(repo_id)
+            if info:
+                return info.mode
+        except Exception:
+            pass
+        return "custom_voice"
+
+    def _populate_qwen3_model_combo(self):
+        """Qwen3-TTS モデル選択ドロップダウンを初期化する。"""
+        self.qwen3_model_combo.blockSignals(True)
+        self.qwen3_model_combo.clear()
+        try:
+            from src.core.qwen3_tts_model_manager import Qwen3TTSModelManager
+            mgr = Qwen3TTSModelManager()
+            for m in mgr.list_models():
+                self.qwen3_model_combo.addItem(m.name, m.repo_id)
+        except Exception:
+            self.qwen3_model_combo.addItem(
+                "Qwen3-TTS 0.6B Base", "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+            )
+        self.qwen3_model_combo.blockSignals(False)
+
+    def _update_qwen3_mode_visibility(self):
+        """選択中モデルのモードに応じてウィジェットの表示を切り替える。"""
+        repo_id = self.qwen3_model_combo.currentData() or ""
+        mode = self._get_mode_for_repo(repo_id)
+
+        self.qwen3_mode_label.setText(self._MODE_DISPLAY.get(mode, mode))
+
+        is_custom = (mode == "custom_voice")
+        is_base = (mode == "base")
+
+        self.qwen3_voice_edit.setVisible(is_custom)
+        self.qwen3_ref_audio_edit.setVisible(is_base)
+        self.qwen3_ref_audio_btn.setVisible(is_base)
+        self.qwen3_ref_audio_label.setVisible(is_base)
+        self.qwen3_ref_text_edit.setVisible(is_base)
+
+    def _on_qwen3_model_selected(self, _idx):
+        """Qwen3-TTS モデルが選択された時の処理。"""
+        char = self._current_character
+        if char is None:
+            return
+        repo_id = self.qwen3_model_combo.currentData() or ""
+        char.tts_params.qwen3_model = repo_id
+        char.tts_params.qwen3_mode = self._get_mode_for_repo(repo_id)
+
+        self._update_qwen3_mode_visibility()
+
+        if self._tts_engine:
+            self._tts_engine.unload_character(char.id)
+        self._update_char_load_status()
+        self.tts_config_changed.emit()
+        self.config_changed.emit()
+
+    def _on_qwen3_params_changed(self):
+        """Qwen3-TTS パラメータが変更された時の処理。"""
+        char = self._current_character
+        if char is None:
+            return
+        tts = char.tts_params
+        tts.qwen3_voice = self.qwen3_voice_edit.text().strip()
+        tts.qwen3_instructions = self.qwen3_instructions_edit.toPlainText().strip()
+        tts.qwen3_ref_audio = self.qwen3_ref_audio_edit.text().strip()
+        tts.qwen3_ref_text = self.qwen3_ref_text_edit.text().strip()
+        self.tts_config_changed.emit()
+        self.config_changed.emit()
+
+    def _on_qwen3_browse_ref_audio(self):
+        """参照音声ファイルを選択するダイアログを表示する。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "参照音声を選択", "",
+            "音声ファイル (*.wav *.mp3 *.flac *.ogg);;すべてのファイル (*)",
+        )
+        if path:
+            self.qwen3_ref_audio_edit.setText(path)
+            self._on_qwen3_params_changed()
 
     # ==================================================================
     # デバイスリスト更新
@@ -694,44 +699,10 @@ class VoicePanel(QWidget):
         self.tts_config_changed.emit()
         self.config_changed.emit()
 
-    # ==================================================================
-    # BERT ロード / アンロード
-    # ==================================================================
-
-    def _on_bert_load(self):
-        if not self._tts_engine:
-            return
-        if self._bert_worker and self._bert_worker.isRunning():
-            return
-        self.bert_load_btn.setEnabled(False)
-        self.bert_load_btn.setText("ロード中...")
-        self.bert_progress.setVisible(True)
-        self.tts_status_label.setText("BERT ダウンロード/ロード中...")
-        self.tts_status_label.setStyleSheet(f"color: {COLORS['warning']}; font-size: 11px;")
-        self._bert_worker = BERTLoadWorker(self._tts_engine, self)
-        self._bert_worker.finished_signal.connect(self._on_bert_load_finished)
-        self._bert_worker.error_signal.connect(self._on_bert_load_error)
-        self._bert_worker.start()
-
-    def _on_bert_load_finished(self):
-        self.bert_load_btn.setText("BERTロード")
-        self.bert_load_btn.setEnabled(True)
-        self.bert_unload_btn.setEnabled(True)
-        self.bert_progress.setVisible(False)
-        self._update_tts_status()
-        self.vram_changed.emit()
-
-    def _on_bert_load_error(self, err):
-        self.bert_load_btn.setText("BERTロード")
-        self.bert_load_btn.setEnabled(True)
-        self.bert_progress.setVisible(False)
-        self.tts_status_label.setText(f"BERT エラー: {err}")
-        self.tts_status_label.setStyleSheet(f"color: {COLORS['error']}; font-size: 11px;")
-
     def _on_tts_unload_all(self):
         if self._tts_engine:
             self._tts_engine.unload_all()
-        self.bert_unload_btn.setEnabled(False)
+        self.tts_unload_btn.setEnabled(False)
         self._update_tts_status()
         self._update_char_load_status()
         self.vram_changed.emit()
@@ -749,19 +720,29 @@ class VoicePanel(QWidget):
         if not self._tts_engine.enabled:
             self.tts_status_label.setText(f"無効{gpu_warn}")
             self.tts_status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
-            self.bert_unload_btn.setEnabled(False)
+            self.tts_unload_btn.setEnabled(False)
             return
-        if self._tts_engine.is_bert_loaded:
-            loaded = self._tts_engine.loaded_character_ids()
+
+        qwen3_ok = getattr(self._tts_engine, "qwen3_available", False)
+        if not qwen3_ok:
             self.tts_status_label.setText(
-                f"BERT ロード済み ({self._tts_engine.device}) / TTS モデル: {len(loaded)}個{gpu_warn}"
+                f"有効 (Qwen3-TTS 利用不可: pip install qwen-tts が必要){gpu_warn}"
+            )
+            self.tts_status_label.setStyleSheet(f"color: {COLORS['warning']}; font-size: 11px;")
+            self.tts_unload_btn.setEnabled(False)
+            return
+
+        loaded = self._tts_engine.loaded_character_ids()
+        if loaded:
+            self.tts_status_label.setText(
+                f"Qwen3-TTS 有効 ({self._tts_engine.device}) / ロード済みキャラ: {len(loaded)}個{gpu_warn}"
             )
             self.tts_status_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 11px;")
-            self.bert_unload_btn.setEnabled(True)
+            self.tts_unload_btn.setEnabled(True)
         else:
-            self.tts_status_label.setText(f"有効 (BERT 未ロード){gpu_warn}")
-            self.tts_status_label.setStyleSheet(f"color: {COLORS['warning']}; font-size: 11px;")
-            self.bert_unload_btn.setEnabled(False)
+            self.tts_status_label.setText(f"Qwen3-TTS 有効 (モデル未ロード){gpu_warn}")
+            self.tts_status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+            self.tts_unload_btn.setEnabled(False)
 
     # ==================================================================
     # キャラクター別 TTS
@@ -781,83 +762,41 @@ class VoicePanel(QWidget):
         self._block_char_signals(True)
 
         self.tts_char_enabled_check.setChecked(tts.enabled)
-        self.tts_style_edit.setText(tts.style)
-        self.tts_speaker_id_spin.setValue(tts.speaker_id)
-        self.tts_length_spin.setValue(tts.length)
-        self.tts_sdp_spin.setValue(tts.sdp_ratio)
-        self.tts_noise_spin.setValue(tts.noise)
-        self.tts_noisew_spin.setValue(tts.noise_w)
-        self.tts_style_weight_spin.setValue(tts.style_weight)
 
-        # モデル選択コンボを同期
-        self._sync_model_combo_to_char(tts)
+        if tts.qwen3_model:
+            for i in range(self.qwen3_model_combo.count()):
+                if self.qwen3_model_combo.itemData(i) == tts.qwen3_model:
+                    self.qwen3_model_combo.setCurrentIndex(i)
+                    break
+        self.qwen3_voice_edit.setText(tts.qwen3_voice)
+        self.qwen3_instructions_edit.setPlainText(tts.qwen3_instructions)
+        self.qwen3_ref_audio_edit.setText(tts.qwen3_ref_audio)
+        self.qwen3_ref_text_edit.setText(tts.qwen3_ref_text)
 
+        self._update_qwen3_mode_visibility()
         self._block_char_signals(False)
         self._update_char_load_status()
 
-    def _sync_model_combo_to_char(self, tts):
-        """キャラクターの model_path からモデル選択コンボのインデックスを合わせる。"""
-        self.tts_model_select_combo.blockSignals(True)
-        matched = False
-        if tts.model_path and self._model_manager:
-            for i in range(1, self.tts_model_select_combo.count()):
-                mid = self.tts_model_select_combo.itemData(i)
-                lm = self._model_manager.get_local_model(mid)
-                if lm and str(lm.model_path) == tts.model_path:
-                    self.tts_model_select_combo.setCurrentIndex(i)
-                    matched = True
-                    break
-        if not matched:
-            self.tts_model_select_combo.setCurrentIndex(0)
-        self.tts_model_select_combo.blockSignals(False)
-
     def _block_char_signals(self, block: bool):
         for w in (
-            self.tts_char_enabled_check, self.tts_style_edit,
-            self.tts_speaker_id_spin, self.tts_length_spin,
-            self.tts_sdp_spin, self.tts_noise_spin,
-            self.tts_noisew_spin, self.tts_style_weight_spin,
-            self.tts_model_select_combo,
+            self.tts_char_enabled_check,
+            self.qwen3_model_combo,
+            self.qwen3_voice_edit, self.qwen3_instructions_edit,
+            self.qwen3_ref_audio_edit, self.qwen3_ref_text_edit,
         ):
             w.blockSignals(block)
 
     def _set_char_tts_widgets_enabled(self, enabled):
         for w in (
-            self.tts_char_enabled_check, self.tts_model_select_combo,
+            self.tts_char_enabled_check,
             self.tts_char_load_btn, self.tts_char_unload_btn,
-            self.tts_style_edit, self.tts_speaker_id_spin,
-            self.tts_length_spin, self.tts_sdp_spin,
-            self.tts_noise_spin, self.tts_noisew_spin,
-            self.tts_style_weight_spin, self.tts_test_btn,
+            self.tts_test_btn,
+            self.qwen3_model_combo,
+            self.qwen3_voice_edit, self.qwen3_instructions_edit,
+            self.qwen3_ref_audio_edit, self.qwen3_ref_audio_btn,
+            self.qwen3_ref_text_edit,
         ):
             w.setEnabled(enabled)
-
-    def _on_model_selected(self, _idx):
-        """ドロップダウンからモデルを選択した時、キャラクターのパスを自動設定する。"""
-        char = self._current_character
-        if char is None or not self._model_manager:
-            return
-        mid = self.tts_model_select_combo.currentData()
-        if not mid:
-            char.tts_params.model_path = ""
-            char.tts_params.config_path = ""
-            char.tts_params.style_vec_path = ""
-        else:
-            lm = self._model_manager.get_local_model(mid)
-            if lm:
-                char.tts_params.model_path = str(lm.model_path)
-                char.tts_params.config_path = str(lm.config_path)
-                char.tts_params.style_vec_path = str(lm.style_vec_path)
-            else:
-                char.tts_params.model_path = ""
-                char.tts_params.config_path = ""
-                char.tts_params.style_vec_path = ""
-
-        if self._tts_engine:
-            self._tts_engine.unload_character(char.id)
-        self._update_char_load_status()
-        self.tts_config_changed.emit()
-        self.config_changed.emit()
 
     def _on_char_tts_toggled(self, checked):
         if self._current_character is None:
@@ -865,69 +804,6 @@ class VoicePanel(QWidget):
         self._current_character.tts_params.enabled = checked
         self.tts_config_changed.emit()
         self.config_changed.emit()
-
-    def _on_char_tts_params_changed(self):
-        char = self._current_character
-        if char is None:
-            return
-        tts = char.tts_params
-        tts.style = self.tts_style_edit.text().strip() or "Neutral"
-        tts.speaker_id = self.tts_speaker_id_spin.value()
-        tts.length = self.tts_length_spin.value()
-        tts.sdp_ratio = self.tts_sdp_spin.value()
-        tts.noise = self.tts_noise_spin.value()
-        tts.noise_w = self.tts_noisew_spin.value()
-        tts.style_weight = self.tts_style_weight_spin.value()
-        self.tts_config_changed.emit()
-        self.config_changed.emit()
-
-    # ==================================================================
-    # キャラクター TTS モデルダウンロード（キャラクターセクション内）
-    # ==================================================================
-
-    def _start_char_download(self, model_id: str):
-        """選択されたモデルをキャラクター TTS セクションからダウンロードする。"""
-        if not self._model_manager:
-            return
-        if self._dl_worker and self._dl_worker.isRunning():
-            return
-
-        self.tts_char_load_btn.setEnabled(False)
-        self.tts_char_load_btn.setText("ダウンロード中...")
-        self.tts_char_load_progress.setVisible(True)
-        self.tts_char_status_label.setText(f"ダウンロード中...")
-        self.tts_char_status_label.setStyleSheet(f"color: {COLORS['warning']}; font-size: 11px;")
-
-        self._dl_worker = TTSModelDownloadWorker(self._model_manager, model_id, self)
-        self._dl_worker.finished_signal.connect(self._on_char_download_finished)
-        self._dl_worker.error_signal.connect(self._on_char_download_error)
-        self._dl_worker.start()
-
-    def _on_char_download_finished(self, model_id: str):
-        self.tts_char_load_progress.setVisible(False)
-        self.tts_char_status_label.setText(f"ダウンロード完了")
-        self.tts_char_status_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 11px;")
-
-        self._refresh_model_combo()
-
-        char = self._current_character
-        if char and self._model_manager:
-            lm = self._model_manager.get_local_model(model_id)
-            if lm:
-                char.tts_params.model_path = str(lm.model_path)
-                char.tts_params.config_path = str(lm.config_path)
-                char.tts_params.style_vec_path = str(lm.style_vec_path)
-                self.tts_config_changed.emit()
-                self.config_changed.emit()
-            self._sync_model_combo_to_char(char.tts_params)
-
-        self._update_char_load_status()
-
-    def _on_char_download_error(self, err: str):
-        self.tts_char_load_progress.setVisible(False)
-        self._update_char_load_status()
-        self.tts_char_status_label.setText(f"ダウンロードエラー: {err}")
-        self.tts_char_status_label.setStyleSheet(f"color: {COLORS['error']}; font-size: 11px;")
 
     # ==================================================================
     # キャラクター TTS ロード / アンロード
@@ -938,28 +814,27 @@ class VoicePanel(QWidget):
         if not char or not self._tts_engine:
             return
 
-        mid = self.tts_model_select_combo.currentData()
-        if not mid:
-            self.tts_char_status_label.setText("TTS モデルを選択してください")
+        qwen3_ok = getattr(self._tts_engine, "qwen3_available", False)
+        if not qwen3_ok:
+            self.tts_char_status_label.setText(
+                "Qwen3-TTS 利用不可 (pip install qwen-tts が必要)"
+            )
             self.tts_char_status_label.setStyleSheet(f"color: {COLORS['error']}; font-size: 11px;")
             return
 
-        lm = self._model_manager.get_local_model(mid) if self._model_manager else None
-        if not lm:
-            self._start_char_download(mid)
+        register_fn = getattr(self._tts_engine, "try_register_cached_model", None)
+        if register_fn and register_fn(char):
+            self._update_char_load_status()
+            self._update_tts_status()
             return
 
-        if not char.tts_params.model_path:
-            self.tts_char_status_label.setText("TTS モデルを選択してください")
-            self.tts_char_status_label.setStyleSheet(f"color: {COLORS['error']}; font-size: 11px;")
-            return
         if self._tts_load_worker and self._tts_load_worker.isRunning():
             return
 
         self.tts_char_load_btn.setEnabled(False)
         self.tts_char_load_btn.setText("ロード中...")
         self.tts_char_load_progress.setVisible(True)
-        self.tts_char_status_label.setText("ロード中...")
+        self.tts_char_status_label.setText("Qwen3-TTS ロード中...")
         self.tts_char_status_label.setStyleSheet(f"color: {COLORS['warning']}; font-size: 11px;")
 
         self._tts_load_worker = TTSLoadWorker(self._tts_engine, char, self)
@@ -997,30 +872,31 @@ class VoicePanel(QWidget):
             self.tts_char_load_btn.setEnabled(False)
             return
 
-        mid = self.tts_model_select_combo.currentData()
-        is_downloaded = bool(
-            self._model_manager and mid and self._model_manager.get_local_model(mid)
-        )
-
-        if mid and not is_downloaded:
-            self.tts_char_load_btn.setText("ダウンロード")
-            self.tts_char_load_btn.setEnabled(True)
-        else:
+        qwen3_ok = getattr(self._tts_engine, "qwen3_available", False)
+        if not qwen3_ok:
             self.tts_char_load_btn.setText("メモリにロード")
-            self.tts_char_load_btn.setEnabled(bool(mid))
+            self.tts_char_load_btn.setEnabled(False)
+            self.tts_char_status_label.setText(
+                "Qwen3-TTS 利用不可 (pip install qwen-tts が必要)"
+            )
+            self.tts_char_status_label.setStyleSheet(f"color: {COLORS['error']}; font-size: 11px;")
+            self.tts_char_unload_btn.setEnabled(False)
+            return
+
+        register_fn = getattr(self._tts_engine, "try_register_cached_model", None)
+        if register_fn:
+            register_fn(char)
 
         loaded = self._tts_engine.is_character_loaded(char.id)
+
+        self.tts_char_load_btn.setText("メモリにロード")
+        self.tts_char_load_btn.setEnabled(True)
         if loaded:
-            self.tts_char_status_label.setText(f"ロード済み ({self._tts_engine.device})")
+            self.tts_char_status_label.setText(f"Qwen3-TTS ロード済み ({self._tts_engine.device})")
             self.tts_char_status_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 11px;")
             self.tts_char_unload_btn.setEnabled(True)
         else:
-            if mid and not is_downloaded:
-                self.tts_char_status_label.setText("モデル未ダウンロード")
-            elif mid:
-                self.tts_char_status_label.setText("未ロード")
-            else:
-                self.tts_char_status_label.setText("モデル未設定")
+            self.tts_char_status_label.setText("Qwen3-TTS 未ロード")
             self.tts_char_status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
             self.tts_char_unload_btn.setEnabled(False)
 
@@ -1049,6 +925,20 @@ class VoicePanel(QWidget):
         self.tts_test_btn.setText("テスト発話")
         self.tts_test_btn.setEnabled(True)
         self.tts_stop_btn.setEnabled(False)
+
+        char = self._current_character
+        if char is not None and not char.tts_params.enabled:
+            char.tts_params.enabled = True
+            self.tts_char_enabled_check.blockSignals(True)
+            self.tts_char_enabled_check.setChecked(True)
+            self.tts_char_enabled_check.blockSignals(False)
+            self.tts_config_changed.emit()
+            self.config_changed.emit()
+            logger.info(
+                "Auto-enabled TTS for character '%s' after successful test.",
+                char.name,
+            )
+
         self._update_tts_status()
         self._update_char_load_status()
 

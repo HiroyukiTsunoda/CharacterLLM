@@ -15,16 +15,13 @@
     "repeat_penalty": 1.1
   },
   "tts": {
-    "enabled": false,
-    "model_path": "tts_models\\jvnv-F2-jp\\jvnv-F2_e166_s20000.safetensors",
-    "config_path": "tts_models\\jvnv-F2-jp\\config.json",
-    "style_vec_path": "tts_models\\jvnv-F2-jp\\style_vectors.npy",
-    "style": "Neutral",
-    "speaker_id": 0,
-    "sdp_ratio": 0.3,
-    "noise": 0.7,
-    "noise_w": 0.9,
-    "length": 0.9,
-    "style_weight": 6.0
+    "enabled": true,
+    "engine": "qwen3",
+    "qwen3_model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "qwen3_mode": "voice_design",
+    "qwen3_voice": "Vivian",
+    "qwen3_instructions": "若いツンデレメイド",
+    "qwen3_ref_audio": "",
+    "qwen3_ref_text": ""
   }
 }

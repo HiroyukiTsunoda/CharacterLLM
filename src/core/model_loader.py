@@ -108,34 +108,41 @@ RECOMMENDED_MODELS: list[HFModelEntry] = [
         estimated_vram_gb=19.0,
         supports_thinking=True,
     ),
-    # --- Qwen3 (日本語最強・thinking対応) ---
+    # --- Qwen3.5 (Qwen3後継・最新世代・256Kコンテキスト・thinking対応) ---
     HFModelEntry(
-        repo_id="Qwen/Qwen3-8B-GGUF",
-        filename="Qwen3-8B-Q4_K_M.gguf",
-        display_name="Qwen3-8B (Q4_K_M)",
-        estimated_vram_gb=5.0,
+        repo_id="unsloth/Qwen3.5-4B-GGUF",
+        filename="Qwen3.5-4B-Q4_K_M.gguf",
+        display_name="Qwen3.5-4B (Q4_K_M)",
+        estimated_vram_gb=5.5,
         supports_thinking=True,
     ),
     HFModelEntry(
-        repo_id="Qwen/Qwen3-14B-GGUF",
-        filename="Qwen3-14B-Q4_K_M.gguf",
-        display_name="Qwen3-14B (Q4_K_M)",
-        estimated_vram_gb=9.0,
+        repo_id="unsloth/Qwen3.5-4B-GGUF",
+        filename="Qwen3.5-4B-Q8_0.gguf",
+        display_name="Qwen3.5-4B (Q8_0)",
+        estimated_vram_gb=10.0,
         supports_thinking=True,
     ),
     HFModelEntry(
-        repo_id="Qwen/Qwen3-32B-GGUF",
-        filename="Qwen3-32B-Q4_K_M.gguf",
-        display_name="Qwen3-32B (Q4_K_M)",
-        estimated_vram_gb=20.5,
+        repo_id="unsloth/Qwen3.5-9B-GGUF",
+        filename="Qwen3.5-9B-Q4_K_M.gguf",
+        display_name="Qwen3.5-9B (Q4_K_M)",
+        estimated_vram_gb=6.5,
         supports_thinking=True,
     ),
-    # --- Qwen3-30B-A3B (MoE Shallow・30B総パラメータ/3.3Bアクティブ・VRAM効率◎) ---
     HFModelEntry(
-        repo_id="Qwen/Qwen3-30B-A3B-GGUF",
-        filename="Qwen3-30B-A3B-Q4_K_M.gguf",
-        display_name="Qwen3-30B-A3B MoE (Q4_K_M)",
-        estimated_vram_gb=18.0,
+        repo_id="unsloth/Qwen3.5-9B-GGUF",
+        filename="Qwen3.5-9B-Q8_0.gguf",
+        display_name="Qwen3.5-9B (Q8_0)",
+        estimated_vram_gb=13.0,
+        supports_thinking=True,
+    ),
+    # --- Qwen3.5-35B-A3B (MoE・35B総/3Bアクティブ・4090で動作可能な最大Qwen3.5) ---
+    HFModelEntry(
+        repo_id="unsloth/Qwen3.5-35B-A3B-GGUF",
+        filename="Qwen3.5-35B-A3B-UD-Q4_K_M.gguf",
+        display_name="Qwen3.5-35B-A3B MoE (UD-Q4_K_M) [4090推奨]",
+        estimated_vram_gb=22.0,
         supports_thinking=True,
     ),
     # --- Gemma 3 (日本語◎・感情表現が豊か・プロンプトで<think>誘導) ---
@@ -221,6 +228,7 @@ class ModelLoader:
         self._supports_thinking: bool = False
         self._uses_think_tags: bool = False
         self._template_inserts_think: bool = False
+        self._needs_state_reset: bool = False
 
     # ------------------------------------------------------------------
     # プロパティ
@@ -319,10 +327,11 @@ class ModelLoader:
         filename_lower = Path(model_path).name.lower()
         self._uses_think_tags = self._supports_thinking and "gpt-oss" not in filename_lower
         self._template_inserts_think = self._detect_template_think_insertion()
+        self._needs_state_reset = "nemotron" in filename_lower
         logger.info(
-            "Model loaded successfully: %s (thinking=%s, think_tags=%s, template_think=%s)",
+            "Model loaded successfully: %s (thinking=%s, think_tags=%s, template_think=%s, state_reset=%s)",
             model_path, self._supports_thinking, self._uses_think_tags,
-            self._template_inserts_think,
+            self._template_inserts_think, self._needs_state_reset,
         )
         return self._model
 
@@ -336,17 +345,65 @@ class ModelLoader:
             self._supports_thinking = False
             self._uses_think_tags = False
             self._template_inserts_think = False
+            self._needs_state_reset = False
             gc.collect()
 
     def _detect_template_think_insertion(self) -> bool:
-        """モデルのチャットテンプレートに <think> 自動挿入が含まれるか検出する。"""
+        """モデルのチャットテンプレートが <think> を自動挿入し、
+        モデルが思考内容を出力した後 </think> で閉じることを期待するか検出する。
+
+        Qwen3.5 Small (4B/9B等) はデフォルトで思考無効: テンプレートが
+        <think>\\n\\n</think> と閉じた状態で挿入するため、モデルは思考タグを
+        出力しない。この場合は False を返す。
+        """
         if self._model is None:
             return False
         try:
             template = self._model.metadata.get("tokenizer.chat_template", "")
-            if "<think>" in template:
-                logger.info("Chat template contains <think> auto-insertion.")
+            if "<think>" not in template:
+                return False
+
+            # add_generation_prompt 付近のテンプレートロジックを取得
+            gen_idx = template.find("add_generation_prompt")
+            if gen_idx == -1:
+                logger.info("Chat template contains <think> (no generation prompt section).")
                 return True
+
+            gen_section = template[gen_idx:]
+
+            if "enable_thinking" in gen_section:
+                # Qwen3.5 系: enable_thinking による条件分岐あり
+                # デフォルト（else節）が <think>\n だけなら思考有効、
+                # <think>...\n</think> と閉じていたら思考無効
+                #
+                # 思考有効テンプレート (35B-A3B):
+                #   if enable_thinking is false → <think>\n\n</think>
+                #   else → <think>\n          ← デフォルト = 思考ON
+                #
+                # 思考無効テンプレート (4B/9B):
+                #   if enable_thinking is true → <think>\n
+                #   else → <think>\n\n</think> ← デフォルト = 思考OFF
+                #
+                # enable_thinking 直後の else節に </think> があるかで判定
+                et_idx = gen_section.find("enable_thinking")
+                else_idx = gen_section.find("else", et_idx)
+                if else_idx != -1:
+                    else_section = gen_section[else_idx:else_idx + 200]
+                    if "</think>" in else_section:
+                        logger.info(
+                            "Chat template has conditional thinking "
+                            "(default=disabled, Qwen3.5 Small pattern)."
+                        )
+                        return False
+                    else:
+                        logger.info(
+                            "Chat template has conditional thinking "
+                            "(default=enabled, Qwen3.5 MoE pattern)."
+                        )
+                        return True
+
+            logger.info("Chat template contains <think> auto-insertion.")
+            return True
         except Exception:
             pass
         return False
@@ -369,12 +426,14 @@ class ModelLoader:
     # ------------------------------------------------------------------
 
     def _reset_state(self) -> None:
-        """モデルの内部状態を完全にリセットする。
+        """Mamba2/SSM ハイブリッドモデル専用: 内部状態をリセットする。
 
-        Mamba2/Transformer ハイブリッドモデルでは、llama-cpp-python の
-        プレフィックスキャッシュが再帰状態と干渉し 2 回目以降の推論で
-        llama_decode エラーが発生する。明示的リセットで回避する。
+        Mamba2 (Nemotron等) ではプレフィックスキャッシュが再帰状態と干渉し
+        2 回目以降の推論で llama_decode エラーが発生する。
+        通常の Transformer モデルでは不要（むしろ KV キャッシュ破壊の原因）。
         """
+        if not self._needs_state_reset:
+            return
         try:
             self._model.reset()
         except AttributeError:

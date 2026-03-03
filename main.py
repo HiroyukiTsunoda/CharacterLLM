@@ -121,7 +121,11 @@ def load_config(config_path: str = "config.json") -> dict:
             "enabled": False,
             "use_gpu": True,
             "auto_play": True,
-            "bert_model": "ku-nlp/deberta-v2-large-japanese-char-wwm",
+            "qwen3": {
+                "default_model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+                "dtype": "bfloat16",
+                "flash_attention": True,
+            },
         },
         "openai": {
             "model": "gpt-4o",

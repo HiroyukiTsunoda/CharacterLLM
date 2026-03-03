@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**ローカルLLM & OpenAI API で動くキャラクターAIチャット — Windows デスクトップアプリ**
+**ローカルLLM & OpenAI API で動くキャラクターAIチャット — Windows デスクトップアプリ（サンドボックス）**
 
 GGUF モデルの GPU 推論と OpenAI API (ChatGPT) の両方に対応。
 個性豊かなキャラクターと音声付きで会話できます。
@@ -22,7 +22,7 @@ GGUF モデルの GPU 推論と OpenAI API (ChatGPT) の両方に対応。
 | **モデル管理** | ローカルGGUFファイルの切替 + HuggingFaceからワンクリックダウンロード |
 | **思考モデル対応** | Qwen3 / GPT-OSS / Nemotron / o3-mini 等の thinking モデルに対応（思考過程の表示・折りたたみ） |
 | **音声入力 (STT)** | faster-whisper による日本語音声認識 |
-| **音声出力 (TTS)** | Style-Bert-VITS2 によるキャラクター別音声合成（感情表現・ト書き対応） |
+| **音声出力 (TTS)** | Qwen3-TTS によるキャラクター別音声合成（CustomVoice / VoiceDesign / 音声クローン対応） |
 | **チャット履歴** | SQLiteによるセッション管理・履歴保存・復元 |
 | **ストリーミング生成** | トークン単位のリアルタイム出力（ローカル・OpenAI 両対応） |
 | **動的トークン調整** | ユーザー入力の内容・長さに応じてmax_tokensを自動最適化 |
@@ -125,11 +125,11 @@ OPENAI_API_KEY=sk-proj-your-api-key-here
 
 ## 同梱キャラクター
 
-| ID | 名前 | 概要 | 声 |
-|----|------|------|----|
-| `default_assistant` | アシスタント | 丁寧語の汎用AIアシスタント | jvnv-M2-jp |
-| `tsundere_maid` | ツンデレメイド アリス | ツンデレ口調のメイド | jvnv-F2-jp |
-| `wise_sage` | 賢者マーリン | 古風な口調の賢者 | jvnv-M1-jp |
+| ID | 名前 | 概要 |
+|----|------|------|
+| `default_assistant` | アシスタント | 丁寧語の汎用AIアシスタント |
+| `tsundere_maid` | ツンデレメイド アリス | ツンデレ口調のメイド |
+| `wise_sage` | 賢者マーリン | 古風な口調の賢者 |
 
 キャラクターは `characters/` に JSON ファイルを追加することで自由に増やせます。
 
@@ -180,7 +180,7 @@ CharacterLLM/
 │   ├── tsundere_maid.json
 │   └── wise_sage.json
 ├── models/                  # GGUFモデル格納先 (.gitignore対象)
-├── tts_models/              # TTSモデル格納先 (.gitignore対象)
+├── tts_models/              # TTSモデル格納先 (.gitignore対象) ※Qwen3-TTSはHuggingFaceキャッシュを使用
 ├── src/
 │   ├── core/
 │   │   ├── character.py     # キャラクター読込・管理
@@ -189,8 +189,10 @@ CharacterLLM/
 │   │   ├── openai_provider.py # OpenAI API プロバイダー
 │   │   ├── gpu_utils.py     # GPU情報取得 (NVML)
 │   │   ├── voice_input.py   # 音声入力 (Whisper STT)
-│   │   ├── voice_output.py  # 音声出力 (Style-Bert-VITS2 TTS)
-│   │   └── tts_model_manager.py # TTSモデル管理
+│   │   ├── qwen3_tts_engine.py     # 音声出力 (Qwen3-TTS)
+│   │   ├── qwen3_tts_model_manager.py # Qwen3-TTS モデル管理
+│   │   ├── tts_base.py             # TTS エンジン抽象基底
+│   │   └── tts_router.py           # TTS ルーター
 │   ├── ui/
 │   │   ├── main_window.py   # メインウィンドウ
 │   │   ├── chat_widget.py   # チャット表示・入力

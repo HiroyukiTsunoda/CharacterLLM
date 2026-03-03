@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.chat_engine import ChatEngine
-from src.core.voice_output import TTSEngine
+from src.core.tts_base import TTSEngineBase
 from src.ui.styles import CHAT_BUBBLE_ASSISTANT, CHAT_BUBBLE_USER, COLORS
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ class TTSWorker(QThread):
 
     def __init__(
         self,
-        tts_engine: TTSEngine,
+        tts_engine: TTSEngineBase,
         text: str,
         character,
         output_device: int | None,
@@ -344,7 +344,7 @@ class ChatWidget(QWidget):
         self,
         chat_engine: ChatEngine,
         voice_engine=None,
-        tts_engine: TTSEngine | None = None,
+        tts_engine: TTSEngineBase | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -567,9 +567,6 @@ class ChatWidget(QWidget):
             return
         if not character.tts_params.enabled:
             logger.info("TTS auto-play skipped: character '%s' TTS disabled", character.name)
-            return
-        if not character.tts_params.model_path:
-            logger.info("TTS auto-play skipped: character '%s' has no TTS model", character.name)
             return
 
         if self._tts_worker is not None and self._tts_worker.isRunning():
