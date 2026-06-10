@@ -52,163 +52,33 @@ class HFModelEntry:
 
 
 # ---------------------------------------------------------------------------
-# ダウンロード可能なおすすめモデル一覧
+# ダウンロード可能なおすすめモデル一覧 (resources/recommended_models.json)
 # ---------------------------------------------------------------------------
 
-RECOMMENDED_MODELS: list[HFModelEntry] = [
-    # --- GPT-OSS Swallow (日本語強化GPT-OSS・MoE 21B総/3.6Bアクティブ・analysis channel) ---
-    HFModelEntry(
-        repo_id="mmnga-o/GPT-OSS-Swallow-20B-RL-v0.1-gguf",
-        filename="GPT-OSS-Swallow-20B-RL-v0.1-Q4_K_M.gguf",
-        display_name="GPT-OSS-Swallow-20B-RL (Q4_K_M) [完全版]",
-        estimated_vram_gb=16.5,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="mmnga-o/GPT-OSS-Swallow-20B-RL-v0.1-gguf",
-        filename="GPT-OSS-Swallow-20B-RL-v0.1-Q5_K_M.gguf",
-        display_name="GPT-OSS-Swallow-20B-RL (Q5_K_M) [完全版]",
-        estimated_vram_gb=17.5,
-        supports_thinking=True,
-    ),
-    # --- Nemotron Nano 9B v2 Japanese (NVIDIA・Mamba2ハイブリッド・日本語特化・thinking対応) ---
-    HFModelEntry(
-        repo_id="mmnga-o/NVIDIA-Nemotron-Nano-9B-v2-Japanese-gguf",
-        filename="NVIDIA-Nemotron-Nano-9B-v2-Japanese-Q4_K_M.gguf",
-        display_name="Nemotron-Nano-9B-v2-JP (Q4_K_M)",
-        estimated_vram_gb=7.0,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="mmnga-o/NVIDIA-Nemotron-Nano-9B-v2-Japanese-gguf",
-        filename="NVIDIA-Nemotron-Nano-9B-v2-Japanese-Q8_0.gguf",
-        display_name="Nemotron-Nano-9B-v2-JP (Q8_0)",
-        estimated_vram_gb=10.0,
-        supports_thinking=True,
-    ),
-    # --- Qwen3 Swallow (日本語強化Qwen3・thinking対応) ---
-    HFModelEntry(
-        repo_id="mmnga-o/Qwen3-Swallow-8B-SFT-v0.2-gguf",
-        filename="Qwen3-Swallow-8B-SFT-v0.2-Q4_K_M.gguf",
-        display_name="Qwen3-Swallow-8B-SFT (Q4_K_M)",
-        estimated_vram_gb=5.5,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="mmnga-o/Qwen3-Swallow-8B-SFT-v0.2-gguf",
-        filename="Qwen3-Swallow-8B-SFT-v0.2-Q8_0.gguf",
-        display_name="Qwen3-Swallow-8B-SFT (Q8_0)",
-        estimated_vram_gb=9.5,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="mmnga-o/Qwen3-Swallow-30B-A3B-SFT-v0.2-gguf",
-        filename="Qwen3-Swallow-30B-A3B-SFT-v0.2-Q4_K_M.gguf",
-        display_name="Qwen3-Swallow-30B-A3B-SFT MoE (Q4_K_M)",
-        estimated_vram_gb=19.0,
-        supports_thinking=True,
-    ),
-    # --- Qwen3.5 (Qwen3後継・最新世代・256Kコンテキスト・thinking対応) ---
-    HFModelEntry(
-        repo_id="unsloth/Qwen3.5-4B-GGUF",
-        filename="Qwen3.5-4B-Q4_K_M.gguf",
-        display_name="Qwen3.5-4B (Q4_K_M)",
-        estimated_vram_gb=5.5,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="unsloth/Qwen3.5-4B-GGUF",
-        filename="Qwen3.5-4B-Q8_0.gguf",
-        display_name="Qwen3.5-4B (Q8_0)",
-        estimated_vram_gb=10.0,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="unsloth/Qwen3.5-9B-GGUF",
-        filename="Qwen3.5-9B-Q4_K_M.gguf",
-        display_name="Qwen3.5-9B (Q4_K_M)",
-        estimated_vram_gb=6.5,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="unsloth/Qwen3.5-9B-GGUF",
-        filename="Qwen3.5-9B-Q8_0.gguf",
-        display_name="Qwen3.5-9B (Q8_0)",
-        estimated_vram_gb=13.0,
-        supports_thinking=True,
-    ),
-    # --- Qwen3.5-35B-A3B (MoE・35B総/3Bアクティブ・4090で動作可能な最大Qwen3.5) ---
-    HFModelEntry(
-        repo_id="unsloth/Qwen3.5-35B-A3B-GGUF",
-        filename="Qwen3.5-35B-A3B-UD-Q4_K_M.gguf",
-        display_name="Qwen3.5-35B-A3B MoE (UD-Q4_K_M) [4090推奨]",
-        estimated_vram_gb=22.0,
-        supports_thinking=True,
-    ),
-    # --- Gemma 3 (日本語◎・感情表現が豊か・プロンプトで<think>誘導) ---
-    HFModelEntry(
-        repo_id="ggml-org/gemma-3-12b-it-GGUF",
-        filename="gemma-3-12b-it-Q4_K_M.gguf",
-        display_name="Gemma3-12B-IT (Q4_K_M)",
-        estimated_vram_gb=7.5,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="ggml-org/gemma-3-27b-it-GGUF",
-        filename="gemma-3-27b-it-Q4_K_M.gguf",
-        display_name="Gemma3-27B-IT (Q4_K_M)",
-        estimated_vram_gb=17.0,
-        supports_thinking=True,
-    ),
-    # --- gpt-oss (OpenAI・MoE軽量高性能・analysis channel) ---
-    HFModelEntry(
-        repo_id="unsloth/gpt-oss-20b-GGUF",
-        filename="gpt-oss-20b-Q4_K_M.gguf",
-        display_name="GPT-OSS-20B (Q4_K_M)",
-        estimated_vram_gb=12.0,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="unsloth/gpt-oss-20b-GGUF",
-        filename="gpt-oss-20b-Q6_K.gguf",
-        display_name="GPT-OSS-20B (Q6_K)",
-        estimated_vram_gb=12.5,
-        supports_thinking=True,
-    ),
-    HFModelEntry(
-        repo_id="unsloth/gpt-oss-20b-GGUF",
-        filename="gpt-oss-20b-Q8_0.gguf",
-        display_name="GPT-OSS-20B (Q8_0)",
-        estimated_vram_gb=13.0,
-        supports_thinking=True,
-    ),
-    # --- Llama 3.1 (汎用・RP派生モデルが豊富) ---
-    HFModelEntry(
-        repo_id="bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
-        filename="Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
-        display_name="Llama3.1-8B-Inst (Q4_K_M)",
-        estimated_vram_gb=5.0,
-    ),
-    HFModelEntry(
-        repo_id="bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
-        filename="Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
-        display_name="Llama3.1-8B-Inst (Q8_0)",
-        estimated_vram_gb=9.0,
-    ),
-    # --- Mistral (RP特化fine-tuneの実績豊富) ---
-    HFModelEntry(
-        repo_id="bartowski/Mistral-Nemo-Instruct-2407-GGUF",
-        filename="Mistral-Nemo-Instruct-2407-Q4_K_M.gguf",
-        display_name="Mistral-Nemo-12B (Q4_K_M)",
-        estimated_vram_gb=7.5,
-    ),
-    HFModelEntry(
-        repo_id="bartowski/Mistral-Small-24B-Instruct-2501-GGUF",
-        filename="Mistral-Small-24B-Instruct-2501-Q4_K_M.gguf",
-        display_name="Mistral-Small-24B (Q4_K_M)",
-        estimated_vram_gb=14.0,
-    ),
-]
+_CATALOG_PATH = Path(__file__).parent.parent.parent / "resources" / "recommended_models.json"
+
+
+def _load_recommended_models() -> list[HFModelEntry]:
+    """resources/recommended_models.json からモデルカタログを読み込む。"""
+    try:
+        with open(_CATALOG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return [
+            HFModelEntry(
+                repo_id=m["repo_id"],
+                filename=m["filename"],
+                display_name=m["display_name"],
+                estimated_vram_gb=m["estimated_vram_gb"],
+                supports_thinking=m.get("supports_thinking", False),
+            )
+            for m in data.get("models", [])
+        ]
+    except Exception as e:
+        logger.warning("Failed to load model catalog (%s): %s", _CATALOG_PATH, e)
+        return []
+
+
+RECOMMENDED_MODELS: list[HFModelEntry] = _load_recommended_models()
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +217,20 @@ class ModelLoader:
             self._template_inserts_think = False
             self._needs_state_reset = False
             gc.collect()
+
+    @staticmethod
+    def synchronize_gpu() -> None:
+        """CUDA カーネルの完了を待つ。
+
+        llama.cpp (ggml) と PyTorch (TTS等) が同一GPUを共有するため、
+        推論完了後・後続のGPU処理前に呼んで競合を防ぐ。
+        """
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+        except Exception:
+            pass
 
     def _detect_template_think_insertion(self) -> bool:
         """モデルのチャットテンプレートが <think> を自動挿入し、

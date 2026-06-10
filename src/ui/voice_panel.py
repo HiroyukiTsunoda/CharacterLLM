@@ -37,9 +37,10 @@ logger = logging.getLogger(__name__)
 WHISPER_MODELS = [
     ("tiny", "tiny (~75MB, 低精度・高速)"),
     ("base", "base (~140MB)"),
-    ("small", "small (~460MB, 推奨)"),
+    ("small", "small (~460MB)"),
     ("medium", "medium (~1.5GB)"),
     ("large-v3", "large-v3 (~3GB, 高精度)"),
+    ("large-v3-turbo", "large-v3-turbo (~1.6GB, 高精度・高速, 推奨)"),
 ]
 
 WHISPER_DEVICES = [

@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "repo_id": "mmnga-o/GPT-OSS-Swallow-20B-RL-v0.1-gguf",
+      "filename": "GPT-OSS-Swallow-20B-RL-v0.1-Q4_K_M.gguf",
+      "display_name": "GPT-OSS-Swallow-20B-RL (Q4_K_M) [完全版]",
+      "estimated_vram_gb": 16.5,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "mmnga-o/GPT-OSS-Swallow-20B-RL-v0.1-gguf",
+      "filename": "GPT-OSS-Swallow-20B-RL-v0.1-Q5_K_M.gguf",
+      "display_name": "GPT-OSS-Swallow-20B-RL (Q5_K_M) [完全版]",
+      "estimated_vram_gb": 17.5,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "mmnga-o/NVIDIA-Nemotron-Nano-9B-v2-Japanese-gguf",
+      "filename": "NVIDIA-Nemotron-Nano-9B-v2-Japanese-Q4_K_M.gguf",
+      "display_name": "Nemotron-Nano-9B-v2-JP (Q4_K_M)",
+      "estimated_vram_gb": 7.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "mmnga-o/NVIDIA-Nemotron-Nano-9B-v2-Japanese-gguf",
+      "filename": "NVIDIA-Nemotron-Nano-9B-v2-Japanese-Q8_0.gguf",
+      "display_name": "Nemotron-Nano-9B-v2-JP (Q8_0)",
+      "estimated_vram_gb": 10.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "mmnga-o/Qwen3-Swallow-8B-SFT-v0.2-gguf",
+      "filename": "Qwen3-Swallow-8B-SFT-v0.2-Q4_K_M.gguf",
+      "display_name": "Qwen3-Swallow-8B-SFT (Q4_K_M)",
+      "estimated_vram_gb": 5.5,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "mmnga-o/Qwen3-Swallow-8B-SFT-v0.2-gguf",
+      "filename": "Qwen3-Swallow-8B-SFT-v0.2-Q8_0.gguf",
+      "display_name": "Qwen3-Swallow-8B-SFT (Q8_0)",
+      "estimated_vram_gb": 9.5,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "mmnga-o/Qwen3-Swallow-30B-A3B-SFT-v0.2-gguf",
+      "filename": "Qwen3-Swallow-30B-A3B-SFT-v0.2-Q4_K_M.gguf",
+      "display_name": "Qwen3-Swallow-30B-A3B-SFT MoE (Q4_K_M)",
+      "estimated_vram_gb": 19.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/Qwen3.6-27B-GGUF",
+      "filename": "Qwen3.6-27B-UD-Q4_K_XL.gguf",
+      "display_name": "Qwen3.6-27B (UD-Q4_K_XL) [最新世代]",
+      "estimated_vram_gb": 18.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/Qwen3.6-35B-A3B-GGUF",
+      "filename": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+      "display_name": "Qwen3.6-35B-A3B MoE (UD-Q4_K_XL) [最新世代・4090推奨]",
+      "estimated_vram_gb": 23.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/Qwen3.5-4B-GGUF",
+      "filename": "Qwen3.5-4B-Q4_K_M.gguf",
+      "display_name": "Qwen3.5-4B (Q4_K_M)",
+      "estimated_vram_gb": 5.5,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/Qwen3.5-4B-GGUF",
+      "filename": "Qwen3.5-4B-Q8_0.gguf",
+      "display_name": "Qwen3.5-4B (Q8_0)",
+      "estimated_vram_gb": 10.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/Qwen3.5-9B-GGUF",
+      "filename": "Qwen3.5-9B-Q4_K_M.gguf",
+      "display_name": "Qwen3.5-9B (Q4_K_M)",
+      "estimated_vram_gb": 6.5,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/Qwen3.5-9B-GGUF",
+      "filename": "Qwen3.5-9B-Q8_0.gguf",
+      "display_name": "Qwen3.5-9B (Q8_0)",
+      "estimated_vram_gb": 13.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/Qwen3.5-35B-A3B-GGUF",
+      "filename": "Qwen3.5-35B-A3B-UD-Q4_K_M.gguf",
+      "display_name": "Qwen3.5-35B-A3B MoE (UD-Q4_K_M) [4090推奨]",
+      "estimated_vram_gb": 22.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "ggml-org/gemma-3-12b-it-GGUF",
+      "filename": "gemma-3-12b-it-Q4_K_M.gguf",
+      "display_name": "Gemma3-12B-IT (Q4_K_M)",
+      "estimated_vram_gb": 7.5,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "ggml-org/gemma-3-27b-it-GGUF",
+      "filename": "gemma-3-27b-it-Q4_K_M.gguf",
+      "display_name": "Gemma3-27B-IT (Q4_K_M)",
+      "estimated_vram_gb": 17.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/gpt-oss-20b-GGUF",
+      "filename": "gpt-oss-20b-Q4_K_M.gguf",
+      "display_name": "GPT-OSS-20B (Q4_K_M)",
+      "estimated_vram_gb": 12.0,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/gpt-oss-20b-GGUF",
+      "filename": "gpt-oss-20b-Q6_K.gguf",
+      "display_name": "GPT-OSS-20B (Q6_K)",
+      "estimated_vram_gb": 12.5,
+      "supports_thinking": true
+    },
+    {
+      "repo_id": "unsloth/gpt-oss-20b-GGUF",
+      "filename": "gpt-oss-20b-Q8_0.gguf",
+      "display_name": "GPT-OSS-20B (Q8_0)",
+      "estimated_vram_gb": 13.0,
+      "supports_thinking": true
+    }
+  ]
+}

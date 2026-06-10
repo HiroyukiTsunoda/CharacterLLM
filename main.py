@@ -83,12 +83,14 @@ def load_config(config_path: str = "config.json") -> dict:
     if path.exists():
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
+    return _default_config()
 
-    # デフォルト設定
-    default_config = {
+
+def _default_config() -> dict:
+    """デフォルト設定を返す。"""
+    return {
         "models_dir": "models",
         "characters_dir": "characters",
-        "database_path": "data/chat_history.db",
         "default_model": None,
         "default_character": "default_assistant",
         "gpu": {
@@ -128,16 +130,11 @@ def load_config(config_path: str = "config.json") -> dict:
             },
         },
         "openai": {
-            "model": "gpt-4o",
+            "model": "gpt-5.4-mini",
+            "reasoning_effort": "low",
             "enabled": False,
         },
     }
-
-    # デフォルト設定を保存
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(default_config, f, ensure_ascii=False, indent=2)
-
-    return default_config
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +153,12 @@ def main():
 
     config = load_config()
     logger.info("Config loaded.")
+
+    # 初回起動時はデフォルト設定をファイルに書き出す
+    if not Path("config.json").exists():
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        logger.info("Default config.json created.")
 
     # PySide6 アプリケーション
     from PySide6.QtWidgets import QApplication

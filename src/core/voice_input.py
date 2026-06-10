@@ -233,16 +233,19 @@ class VoiceEngine:
 
     def stop_recording(self) -> np.ndarray | None:
         """録音を停止し、音声データを返す。短すぎる場合は None を返す。"""
+        # ストリーム参照の取得・解除をロック内で行い、
+        # 別スレッドの _callback との競合を防ぐ
         with self._lock:
             self._recording = False
+            stream = self._stream
+            self._stream = None
 
-        if self._stream is not None:
+        if stream is not None:
             try:
-                self._stream.stop()
-                self._stream.close()
+                stream.stop()
+                stream.close()
             except Exception as e:
                 logger.warning("Error stopping stream: %s", e)
-            self._stream = None
 
         with self._lock:
             if not self._audio_buffer:

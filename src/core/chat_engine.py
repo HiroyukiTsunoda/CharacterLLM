@@ -12,6 +12,7 @@ from typing import Iterator, Optional
 from src.core.character import Character, CharacterManager
 from src.core.model_loader import ModelLoader
 from src.core.openai_provider import OpenAIProvider
+from src.core.provider_protocol import InferenceProvider
 
 logger = logging.getLogger(__name__)
 raw_logger = logging.getLogger("llm_raw")
@@ -69,7 +70,7 @@ class ChatEngine:
         return list(self._history)
 
     @property
-    def active_provider(self):
+    def active_provider(self) -> InferenceProvider:
         """現在アクティブな推論プロバイダーを返す。"""
         return self.openai_provider if self._use_openai else self.model_loader
 
@@ -124,10 +125,9 @@ class ChatEngine:
         )
         self._history.append(msg)
 
-        # 履歴が長くなりすぎたら古いものを削除（systemは除く）
-        user_assistant_msgs = [m for m in self._history if m.role != "system"]
-        if len(user_assistant_msgs) > self._max_history:
-            # 最も古いuser/assistantメッセージを削除
+        # 履歴が長くなりすぎたら最も古いuser/assistantメッセージを削除（systemは除く）
+        non_system_count = sum(1 for m in self._history if m.role != "system")
+        if non_system_count > self._max_history:
             for i, m in enumerate(self._history):
                 if m.role != "system":
                     self._history.pop(i)
@@ -399,6 +399,10 @@ class ChatEngine:
         思考ブロックは THINK_STREAM_START / THINK_STREAM_END マーカーで
         囲んで yield される。UI 側でマーカーを検出し思考セクションへ振り分ける。
 
+        フェーズごとの処理は _phase_* メソッドに分離されている。各メソッドは
+        (phase, buffer, pending, outs, prefix_stripped) を返し、outs の内容が
+        この順に yield される。
+
         対応フォーマット:
           - Qwen3: <think>...</think>
           - テンプレート自動挿入: 生テキスト...<think>...</think>...</think>応答
@@ -411,234 +415,59 @@ class ChatEngine:
         self._last_think_content = ""
         prefix_stripped = False
         _raw_output_tokens: list[str] = []
-        template_inserts_think = self.model_loader.template_inserts_think
-
-        _CLOSE_THINK = "</think>"
-        _CLOSE_THINK_LEN = len(_CLOSE_THINK)
+        template_inserts_think = self.active_provider.template_inserts_think
 
         for token in token_stream:
             _raw_output_tokens.append(token)
+
             # --- passthrough: 応答トークンをそのまま流す ---
             if phase == "passthrough":
                 pending += token
                 new_phase, new_buf, new_pend, to_yield = (
                     self._check_passthrough(pending)
                 )
+                if to_yield:
+                    yield to_yield
                 if new_phase == "done":
-                    if to_yield:
-                        yield to_yield
                     pending = ""
                     buffer = ""
                     break
-                elif new_phase != "passthrough":
-                    if to_yield:
-                        yield to_yield
+                if new_phase != "passthrough":
                     buffer = new_buf
                     pending = ""
                     phase = new_phase
                     prefix_stripped = False
                 else:
-                    if to_yield:
-                        yield to_yield
                     pending = new_pend
                 continue
 
             buffer += token
 
-            # --- detect: ストリーム冒頭のフォーマット判定 ---
             if phase == "detect":
-                stripped = buffer.lstrip()
-                if stripped.startswith("<think>"):
-                    phase = "in_think"
-                    prefix_stripped = False
-                elif stripped.startswith("</think>"):
-                    # Qwen3: チャットテンプレートが <think> を自動挿入済み。
-                    # ストリームは </think> で始まり、その後に思考内容、
-                    # 再度 </think> で閉じられてから応答が続く。
-                    close_end = buffer.find("</think>") + len("</think>")
-                    buffer = buffer[close_end:]
-                    phase = "in_think"
-                    prefix_stripped = True
-                    yield self.THINK_STREAM_START
-                elif stripped.startswith("<|channel|>"):
-                    phase = "in_analysis"
-                elif self._THINK_KW in stripped:
-                    phase = "in_section_think"
-                    prefix_stripped = False
-                elif len(stripped) >= self._DETECT_WINDOW:
-                    if template_inserts_think:
-                        # テンプレートが <think> を自動挿入しているが、
-                        # モデル出力がタグなしで始まった (Nemotron パターン)。
-                        # 生テキストは暗黙的な思考ブロック内。
-                        phase = "in_implicit_think"
-                        yield self.THINK_STREAM_START
-                    else:
-                        new_phase, new_buf, new_pend, to_yield = (
-                            self._check_passthrough(buffer)
-                        )
-                        if to_yield:
-                            yield to_yield
-                        buffer = new_buf
-                        pending = new_pend
-                        phase = new_phase
-                        if new_phase != "passthrough":
-                            prefix_stripped = False
-                continue
-
-            # --- in_think: <think>...</think> ---
-            if phase == "in_think":
-                if not prefix_stripped:
-                    idx = buffer.find("<think>")
-                    if idx != -1:
-                        buffer = buffer[idx + len("<think>"):]
-                        prefix_stripped = True
-                        yield self.THINK_STREAM_START
-
-                if prefix_stripped:
-                    end_idx = buffer.find(_CLOSE_THINK)
-                    if end_idx != -1:
-                        tail = buffer[:end_idx]
-                        if tail:
-                            self._last_think_content += tail
-                            yield tail
-                        yield self.THINK_STREAM_END
-
-                        remaining = buffer[end_idx + _CLOSE_THINK_LEN:]
-                        remaining = remaining.lstrip("\n ")
-                        buffer = ""
-                        pending = ""
-                        phase = "passthrough"
-                        prefix_stripped = False
-
-                        if remaining:
-                            sec_start, _ = self._find_section_kw(
-                                remaining, self._THINK_KW,
-                            )
-                            if sec_start != -1:
-                                if sec_start > 0:
-                                    yield remaining[:sec_start]
-                                buffer = remaining[sec_start:]
-                                phase = "in_section_think"
-                                prefix_stripped = False
-                            else:
-                                remaining = remaining.replace(
-                                    _CLOSE_THINK, "",
-                                )
-                                if remaining:
-                                    yield remaining
-                    else:
-                        safe = len(buffer) - _CLOSE_THINK_LEN + 1
-                        if safe > 0:
-                            chunk = buffer[:safe]
-                            self._last_think_content += chunk
-                            yield chunk
-                            buffer = buffer[safe:]
-
-            # --- in_section_think: [前置]思考内容...[前置]応答内容 ---
+                phase, buffer, pending, outs, prefix_stripped = (
+                    self._phase_detect(
+                        buffer, pending, template_inserts_think, prefix_stripped,
+                    )
+                )
+            elif phase == "in_think":
+                phase, buffer, pending, outs, prefix_stripped = (
+                    self._phase_in_think(buffer, pending, prefix_stripped)
+                )
             elif phase == "in_section_think":
-                if not prefix_stripped:
-                    _, kw_end = self._find_section_kw(
-                        buffer, self._THINK_KW,
-                    )
-                    if kw_end != -1:
-                        buffer = buffer[kw_end:]
-                        prefix_stripped = True
-                        if self._last_think_content:
-                            self._last_think_content += "\n"
-                        yield self.THINK_STREAM_START
-
-                if prefix_stripped:
-                    resp_start, resp_end = self._find_section_kw(
-                        buffer, self._RESPONSE_KW,
-                    )
-                    if resp_start != -1:
-                        tail = buffer[:resp_start]
-                        if tail:
-                            self._last_think_content += tail
-                            yield tail
-                        yield self.THINK_STREAM_END
-
-                        remaining = buffer[resp_end:]
-                        remaining = remaining.lstrip("\n ")
-                        remaining = remaining.replace(_CLOSE_THINK, "")
-                        buffer = ""
-                        pending = ""
-                        phase = "passthrough"
-                        prefix_stripped = False
-                        if remaining:
-                            yield remaining
-                    else:
-                        kw_len = len(self._RESPONSE_KW)
-                        safe = len(buffer) - kw_len + 1
-                        if safe > 0:
-                            chunk = buffer[:safe]
-                            self._last_think_content += chunk
-                            yield chunk
-                            buffer = buffer[safe:]
-
-            # --- in_analysis: gpt-oss analysis channel ---
+                phase, buffer, pending, outs, prefix_stripped = (
+                    self._phase_in_section_think(buffer, pending, prefix_stripped)
+                )
             elif phase == "in_analysis":
-                final_marker = "<|channel|>final<|message|>"
-                marker_idx = buffer.find(final_marker)
-                if marker_idx != -1:
-                    analysis_start = "<|channel|>analysis<|message|>"
-                    a_idx = buffer.find(analysis_start)
-                    analysis_text = ""
-                    if a_idx != -1:
-                        a_start = a_idx + len(analysis_start)
-                        a_end = buffer.find("<|end|>", a_start)
-                        if a_end != -1 and a_end < marker_idx:
-                            analysis_text = buffer[a_start:a_end].strip()
-
-                    if analysis_text:
-                        self._last_think_content = analysis_text
-                        yield self.THINK_STREAM_START
-                        yield analysis_text
-                        yield self.THINK_STREAM_END
-
-                    remaining = buffer[marker_idx + len(final_marker):]
-                    remaining = remaining.lstrip("\n ")
-                    # gpt-oss end-of-turn: <|end|> 以降を除去
-                    _eidx = remaining.find("<|end|>")
-                    if _eidx != -1:
-                        remaining = remaining[:_eidx]
-                    buffer = ""
-                    pending = ""
-                    phase = "passthrough"
-                    prefix_stripped = False
-                    if remaining:
-                        yield remaining
-
-            # --- in_implicit_think: テンプレート自動挿入 <think> ---
-            # <think> はモデル出力中に literal に出現しうるため depth
-            # tracking は行わず、最初の </think> で思考終了とする。
-            # 残り文字列に後続の </think> がある場合は strip_think が
-            # finalize 時に正しく処理する。
+                phase, buffer, pending, outs, prefix_stripped = (
+                    self._phase_in_analysis(buffer, pending, prefix_stripped)
+                )
             elif phase == "in_implicit_think":
-                close_idx = buffer.find(_CLOSE_THINK)
-                if close_idx != -1:
-                    tail = buffer[:close_idx]
-                    if tail:
-                        self._last_think_content += tail
-                        yield tail
-                    yield self.THINK_STREAM_END
-
-                    remaining = buffer[close_idx + _CLOSE_THINK_LEN:]
-                    remaining = remaining.lstrip("\n ")
-                    buffer = ""
-                    pending = ""
-                    phase = "passthrough"
-                    prefix_stripped = False
-
-                    if remaining:
-                        yield remaining
-                else:
-                    safe = len(buffer) - _CLOSE_THINK_LEN + 1
-                    if safe > 0:
-                        chunk = buffer[:safe]
-                        self._last_think_content += chunk
-                        yield chunk
-                        buffer = buffer[safe:]
+                phase, buffer, pending, outs, prefix_stripped = (
+                    self._phase_in_implicit_think(buffer, pending, prefix_stripped)
+                )
+            else:
+                outs = []
+            yield from outs
 
         # --- ストリーム終端処理 ---
         # gpt-oss end-of-turn marker が残っていたら除去
@@ -667,6 +496,212 @@ class ChatEngine:
 
         raw_text = "".join(_raw_output_tokens)
         raw_logger.info("=== LLM Raw Output (stream) ===\n%s\n=== END ===", raw_text)
+
+    # ------------------------------------------------------------------
+    # ストリームフィルタの各フェーズ処理
+    # 各メソッドは (phase, buffer, pending, outs, prefix_stripped) を返す
+    # ------------------------------------------------------------------
+
+    _CLOSE_THINK = "</think>"
+
+    def _phase_detect(
+        self,
+        buffer: str,
+        pending: str,
+        template_inserts_think: bool,
+        prefix_stripped: bool,
+    ) -> tuple[str, str, str, list[str], bool]:
+        """detect: ストリーム冒頭のフォーマット判定。"""
+        outs: list[str] = []
+        stripped = buffer.lstrip()
+
+        if stripped.startswith("<think>"):
+            return "in_think", buffer, pending, outs, False
+
+        if stripped.startswith("</think>"):
+            # Qwen3: チャットテンプレートが <think> を自動挿入済み。
+            # ストリームは </think> で始まり、その後に思考内容、
+            # 再度 </think> で閉じられてから応答が続く。
+            close_end = buffer.find(self._CLOSE_THINK) + len(self._CLOSE_THINK)
+            outs.append(self.THINK_STREAM_START)
+            return "in_think", buffer[close_end:], pending, outs, True
+
+        if stripped.startswith("<|channel|>"):
+            return "in_analysis", buffer, pending, outs, prefix_stripped
+
+        if self._THINK_KW in stripped:
+            return "in_section_think", buffer, pending, outs, False
+
+        if len(stripped) >= self._DETECT_WINDOW:
+            if template_inserts_think:
+                # テンプレートが <think> を自動挿入しているが、
+                # モデル出力がタグなしで始まった (Nemotron パターン)。
+                # 生テキストは暗黙的な思考ブロック内。
+                outs.append(self.THINK_STREAM_START)
+                return "in_implicit_think", buffer, pending, outs, prefix_stripped
+
+            new_phase, new_buf, new_pend, to_yield = self._check_passthrough(buffer)
+            if to_yield:
+                outs.append(to_yield)
+            if new_phase != "passthrough":
+                prefix_stripped = False
+            return new_phase, new_buf, new_pend, outs, prefix_stripped
+
+        return "detect", buffer, pending, outs, prefix_stripped
+
+    def _phase_in_think(
+        self, buffer: str, pending: str, prefix_stripped: bool,
+    ) -> tuple[str, str, str, list[str], bool]:
+        """in_think: <think>...</think> ブロックの処理。"""
+        outs: list[str] = []
+
+        if not prefix_stripped:
+            idx = buffer.find("<think>")
+            if idx != -1:
+                buffer = buffer[idx + len("<think>"):]
+                prefix_stripped = True
+                outs.append(self.THINK_STREAM_START)
+            else:
+                # 開始タグがまだ完全に届いていない
+                return "in_think", buffer, pending, outs, prefix_stripped
+
+        end_idx = buffer.find(self._CLOSE_THINK)
+        if end_idx == -1:
+            # 閉じタグ未着: タグの部分一致マージンを残して思考を流す
+            safe = len(buffer) - len(self._CLOSE_THINK) + 1
+            if safe > 0:
+                chunk = buffer[:safe]
+                self._last_think_content += chunk
+                outs.append(chunk)
+                buffer = buffer[safe:]
+            return "in_think", buffer, pending, outs, prefix_stripped
+
+        tail = buffer[:end_idx]
+        if tail:
+            self._last_think_content += tail
+            outs.append(tail)
+        outs.append(self.THINK_STREAM_END)
+
+        remaining = buffer[end_idx + len(self._CLOSE_THINK):].lstrip("\n ")
+        if not remaining:
+            return "passthrough", "", "", outs, False
+
+        # 思考タグの直後にセクションマーカーが続くパターン
+        sec_start, _ = self._find_section_kw(remaining, self._THINK_KW)
+        if sec_start != -1:
+            if sec_start > 0:
+                outs.append(remaining[:sec_start])
+            return "in_section_think", remaining[sec_start:], "", outs, False
+
+        remaining = remaining.replace(self._CLOSE_THINK, "")
+        if remaining:
+            outs.append(remaining)
+        return "passthrough", "", "", outs, False
+
+    def _phase_in_section_think(
+        self, buffer: str, pending: str, prefix_stripped: bool,
+    ) -> tuple[str, str, str, list[str], bool]:
+        """in_section_think: [前置]思考内容...[前置]応答内容 の処理。"""
+        outs: list[str] = []
+
+        if not prefix_stripped:
+            _, kw_end = self._find_section_kw(buffer, self._THINK_KW)
+            if kw_end != -1:
+                buffer = buffer[kw_end:]
+                prefix_stripped = True
+                if self._last_think_content:
+                    self._last_think_content += "\n"
+                outs.append(self.THINK_STREAM_START)
+            else:
+                return "in_section_think", buffer, pending, outs, prefix_stripped
+
+        resp_start, resp_end = self._find_section_kw(buffer, self._RESPONSE_KW)
+        if resp_start == -1:
+            # 応答マーカー未着: キーワードの部分一致マージンを残して思考を流す
+            safe = len(buffer) - len(self._RESPONSE_KW) + 1
+            if safe > 0:
+                chunk = buffer[:safe]
+                self._last_think_content += chunk
+                outs.append(chunk)
+                buffer = buffer[safe:]
+            return "in_section_think", buffer, pending, outs, prefix_stripped
+
+        tail = buffer[:resp_start]
+        if tail:
+            self._last_think_content += tail
+            outs.append(tail)
+        outs.append(self.THINK_STREAM_END)
+
+        remaining = buffer[resp_end:].lstrip("\n ").replace(self._CLOSE_THINK, "")
+        if remaining:
+            outs.append(remaining)
+        return "passthrough", "", "", outs, False
+
+    def _phase_in_analysis(
+        self, buffer: str, pending: str, prefix_stripped: bool,
+    ) -> tuple[str, str, str, list[str], bool]:
+        """in_analysis: gpt-oss analysis channel の処理。"""
+        outs: list[str] = []
+        final_marker = "<|channel|>final<|message|>"
+        marker_idx = buffer.find(final_marker)
+        if marker_idx == -1:
+            # final マーカー未着: analysis 全体をバッファして待つ
+            return "in_analysis", buffer, pending, outs, prefix_stripped
+
+        analysis_start = "<|channel|>analysis<|message|>"
+        a_idx = buffer.find(analysis_start)
+        analysis_text = ""
+        if a_idx != -1:
+            a_start = a_idx + len(analysis_start)
+            a_end = buffer.find("<|end|>", a_start)
+            if a_end != -1 and a_end < marker_idx:
+                analysis_text = buffer[a_start:a_end].strip()
+
+        if analysis_text:
+            self._last_think_content = analysis_text
+            outs.append(self.THINK_STREAM_START)
+            outs.append(analysis_text)
+            outs.append(self.THINK_STREAM_END)
+
+        remaining = buffer[marker_idx + len(final_marker):].lstrip("\n ")
+        # gpt-oss end-of-turn: <|end|> 以降を除去
+        _eidx = remaining.find("<|end|>")
+        if _eidx != -1:
+            remaining = remaining[:_eidx]
+        if remaining:
+            outs.append(remaining)
+        return "passthrough", "", "", outs, False
+
+    def _phase_in_implicit_think(
+        self, buffer: str, pending: str, prefix_stripped: bool,
+    ) -> tuple[str, str, str, list[str], bool]:
+        """in_implicit_think: テンプレート自動挿入 <think> の処理。
+
+        <think> はモデル出力中に literal に出現しうるため depth tracking は
+        行わず、最初の </think> で思考終了とする。残り文字列に後続の
+        </think> がある場合は strip_think が finalize 時に正しく処理する。
+        """
+        outs: list[str] = []
+        close_idx = buffer.find(self._CLOSE_THINK)
+        if close_idx == -1:
+            safe = len(buffer) - len(self._CLOSE_THINK) + 1
+            if safe > 0:
+                chunk = buffer[:safe]
+                self._last_think_content += chunk
+                outs.append(chunk)
+                buffer = buffer[safe:]
+            return "in_implicit_think", buffer, pending, outs, prefix_stripped
+
+        tail = buffer[:close_idx]
+        if tail:
+            self._last_think_content += tail
+            outs.append(tail)
+        outs.append(self.THINK_STREAM_END)
+
+        remaining = buffer[close_idx + len(self._CLOSE_THINK):].lstrip("\n ")
+        if remaining:
+            outs.append(remaining)
+        return "passthrough", "", "", outs, False
 
     # ------------------------------------------------------------------
     # チャット実行
@@ -756,31 +791,8 @@ class ChatEngine:
         self._last_think_content = think
         self.add_message("assistant", clean, think_content=think)
 
-    # ------------------------------------------------------------------
-    # シリアライズ（DB保存用）
-    # ------------------------------------------------------------------
+        # llama.cpp の CUDA 操作を完全に完了させ、後続の TTS が
+        # GPU を安全に使えるようにする
+        if not self._use_openai:
+            self.model_loader.synchronize_gpu()
 
-    def get_history_dicts(self) -> list[dict]:
-        """履歴を辞書リストで返す（DB保存用）。"""
-        return [
-            {
-                "role": m.role,
-                "content": m.content,
-                "character_id": m.character_id,
-                "think_content": m.think_content,
-            }
-            for m in self._history
-        ]
-
-    def load_history(self, messages: list[dict]) -> None:
-        """辞書リストから履歴を復元する。"""
-        self._history.clear()
-        for m in messages:
-            self._history.append(
-                ChatMessage(
-                    role=m["role"],
-                    content=m["content"],
-                    character_id=m.get("character_id", ""),
-                    think_content=m.get("think_content", ""),
-                )
-            )

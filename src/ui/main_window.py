@@ -52,7 +52,10 @@ class MainWindow(QMainWindow):
             models_dir=config.get("models_dir", "models"),
             config=config,
         )
-        self.openai_provider = OpenAIProvider()
+        openai_cfg = config.get("openai", {})
+        self.openai_provider = OpenAIProvider(
+            reasoning_effort=openai_cfg.get("reasoning_effort", "low"),
+        )
         self.character_manager = CharacterManager(
             characters_dir=config.get("characters_dir", "characters"),
         )
@@ -65,7 +68,6 @@ class MainWindow(QMainWindow):
         self.tts_engine = TTSRouter(config=config)
 
         # config の openai.enabled が True なら起動時に OpenAI モードへ
-        openai_cfg = config.get("openai", {})
         if openai_cfg.get("enabled", False):
             self.chat_engine.set_use_openai(True)
 
@@ -348,35 +350,19 @@ class MainWindow(QMainWindow):
     def _on_settings_saved(self, new_config: dict):
         """設定が保存された時。"""
         self.config.update(new_config)
-        # config.jsonに書き戻す
-        try:
-            config_path = Path("config.json")
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, ensure_ascii=False, indent=2)
-            self.status_bar.showMessage("設定を保存しました")
-        except Exception as e:
-            logger.error("Failed to save config: %s", e)
+        self._save_config()
+        self.status_bar.showMessage("設定を保存しました")
 
     def _on_voice_config_changed(self):
         """音声パネルの設定変更時に config を保存する。"""
         self.config["voice"] = self.voice_engine.get_config()
         self.config["tts"] = self.tts_engine.get_config()
-        try:
-            config_path = Path("config.json")
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error("Failed to save voice config: %s", e)
+        self._save_config()
 
     def _on_tts_config_changed(self):
         """TTS 設定変更時に config とキャラクターJSON を保存する。"""
         self.config["tts"] = self.tts_engine.get_config()
-        try:
-            config_path = Path("config.json")
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error("Failed to save TTS config: %s", e)
+        self._save_config()
 
         char = self.chat_engine.current_character
         if char is not None:

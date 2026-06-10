@@ -42,15 +42,21 @@ class OpenAIModelEntry:
     model_id: str
     display_name: str
     supports_thinking: bool = False
+    # GPT-5.x 系推論モデル: max_completion_tokens/reasoning_effort を使い、
+    # temperature/top_p/frequency_penalty は非サポート（送るとAPIエラー）
+    is_reasoning: bool = False
 
 
 AVAILABLE_MODELS: list[OpenAIModelEntry] = [
-    OpenAIModelEntry("gpt-4o", "GPT-4o (最新・高性能)"),
-    OpenAIModelEntry("gpt-4o-mini", "GPT-4o mini (高速・低コスト)"),
-    OpenAIModelEntry("gpt-4-turbo", "GPT-4 Turbo"),
-    OpenAIModelEntry("gpt-3.5-turbo", "GPT-3.5 Turbo (最安)"),
-    OpenAIModelEntry("o3-mini", "o3-mini (推論モデル)", supports_thinking=True),
+    OpenAIModelEntry("gpt-5.4-mini", "GPT-5.4 mini (推奨・高速/低コスト)", is_reasoning=True),
+    OpenAIModelEntry("gpt-5.4", "GPT-5.4 (高性能)", is_reasoning=True),
+    OpenAIModelEntry("gpt-5.5", "GPT-5.5 (最高性能)", is_reasoning=True),
+    OpenAIModelEntry("gpt-5.4-nano", "GPT-5.4 nano (最安・最速)", is_reasoning=True),
 ]
+
+# 推論モデルは思考トークンが max_completion_tokens から消費されるため、
+# 応答が切れないよう本文予算に上乗せするバッファ
+_REASONING_TOKEN_BUFFER = 1024
 
 
 class OpenAIProvider:
@@ -60,11 +66,14 @@ class OpenAIProvider:
     ChatEngine は provider を差し替えるだけで利用できる。
     """
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, reasoning_effort: str = "low"):
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self._client = None
         self._current_model: str | None = None
         self._supports_thinking: bool = False
+        self._is_reasoning: bool = False
+        # チャット用途では低レイテンシ優先で "low" をデフォルトとする
+        self._reasoning_effort = reasoning_effort
 
     # ------------------------------------------------------------------
     # ModelLoader 互換プロパティ
@@ -102,7 +111,7 @@ class OpenAIProvider:
         self._api_key = api_key
         self._client = None
 
-    def connect(self, model_id: str = "gpt-4o") -> None:
+    def connect(self, model_id: str = "gpt-5.4-mini") -> None:
         """OpenAI クライアントを初期化し、モデルを選択する。"""
         if not self._api_key:
             raise ValueError(
@@ -116,6 +125,8 @@ class OpenAIProvider:
 
         entry = self._find_entry(model_id)
         self._supports_thinking = entry.supports_thinking if entry else False
+        # 未知のモデルIDは GPT-5.x 世代とみなし推論モデルとして扱う
+        self._is_reasoning = entry.is_reasoning if entry else True
 
         logger.info("OpenAI provider connected: model=%s", model_id)
 
@@ -124,20 +135,30 @@ class OpenAIProvider:
         self._client = None
         self._current_model = None
         self._supports_thinking = False
+        self._is_reasoning = False
         logger.info("OpenAI provider disconnected.")
 
     def test_connection(self) -> str:
         """API 接続をテストし、結果メッセージを返す。"""
         if not self._api_key:
             return "APIキーが未設定です。"
+        model_id = self._current_model or "gpt-5.4-mini"
+        entry = self._find_entry(model_id)
+        is_reasoning = entry.is_reasoning if entry else True
         try:
             from openai import OpenAI
             client = OpenAI(api_key=self._api_key, max_retries=0)
-            response = client.chat.completions.create(
-                model=self._current_model or "gpt-4o-mini",
+            kwargs = dict(
+                model=model_id,
                 messages=[{"role": "user", "content": "Hi"}],
-                max_tokens=5,
             )
+            if is_reasoning:
+                # 推論モデルは max_tokens 非サポート。本文が空でも疎通確認には十分
+                kwargs["max_completion_tokens"] = 16
+                kwargs["reasoning_effort"] = self._reasoning_effort
+            else:
+                kwargs["max_tokens"] = 5
+            response = client.chat.completions.create(**kwargs)
             return f"接続成功 (モデル: {response.model})"
         except Exception as e:
             return f"接続失敗: {_friendly_error(e)}"
@@ -161,25 +182,32 @@ class OpenAIProvider:
                 "OpenAI プロバイダーが接続されていません。先に connect() を呼んでください。"
             )
 
-        # repeat_penalty → frequency_penalty に概算マッピング
-        # llama.cpp の repeat_penalty 1.0 = ペナルティなし、OpenAI の frequency_penalty 0.0 = なし
-        freq_penalty = max(0.0, min(2.0, (repeat_penalty - 1.0) * 2.0))
-
         kwargs = dict(
             model=self._current_model,
             messages=messages,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            frequency_penalty=freq_penalty,
             stream=stream,
         )
 
-        # o-series モデルは temperature/top_p をサポートしない
-        if self._current_model.startswith("o"):
-            kwargs.pop("temperature", None)
-            kwargs.pop("top_p", None)
-            kwargs.pop("frequency_penalty", None)
+        if self._is_reasoning:
+            # GPT-5.x 系推論モデル: temperature/top_p/frequency_penalty/max_tokens は
+            # 非サポート（送るとAPIエラー）。推論量は reasoning_effort で制御する。
+            kwargs["max_completion_tokens"] = max_tokens + _REASONING_TOKEN_BUFFER
+            kwargs["reasoning_effort"] = self._reasoning_effort
+            logger.debug(
+                "Reasoning model %s: temperature/top_p/repeat_penalty are ignored "
+                "(reasoning_effort=%s)",
+                self._current_model, self._reasoning_effort,
+            )
+        else:
+            # repeat_penalty → frequency_penalty に概算マッピング
+            # llama.cpp の repeat_penalty 1.0 = ペナルティなし、OpenAI の frequency_penalty 0.0 = なし
+            freq_penalty = max(0.0, min(2.0, (repeat_penalty - 1.0) * 2.0))
+            kwargs.update(
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                frequency_penalty=freq_penalty,
+            )
 
         try:
             if stream:

@@ -1,7 +1,6 @@
 {
   "models_dir": "models",
   "characters_dir": "characters",
-  "database_path": "data/chat_history.db",
   "default_model": null,
   "default_character": "default_assistant",
   "gpu": {
@@ -41,7 +40,8 @@
     }
   },
   "openai": {
-    "model": "gpt-4o",
+    "model": "gpt-5.4-mini",
+    "reasoning_effort": "low",
     "enabled": false
   }
 }

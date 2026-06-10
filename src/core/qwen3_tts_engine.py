@@ -7,11 +7,11 @@ qwen-tts パッケージを使用し、CustomVoice / VoiceDesign / Base(音声�
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import os
 import re
-import sys
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -168,15 +168,11 @@ class Qwen3TTSEngine(TTSEngineBase):
         sox_logger.setLevel(logging.CRITICAL)
 
         devnull = io.StringIO()
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = devnull
-        sys.stderr = devnull
         try:
-            from qwen_tts import Qwen3TTSModel
-            cls._qwen3_model_cls = Qwen3TTSModel
+            with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+                from qwen_tts import Qwen3TTSModel
+                cls._qwen3_model_cls = Qwen3TTSModel
         finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
             sox_logger.setLevel(prev_sox_level)
 
         return cls._qwen3_model_cls

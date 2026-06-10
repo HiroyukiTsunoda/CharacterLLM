@@ -16,14 +16,13 @@ GGUF モデルの GPU 推論と OpenAI API (ChatGPT) の両方に対応。
 | 機能 | 概要 |
 |------|------|
 | **ローカルLLM推論** | llama-cpp-python + CUDA でGGUFモデルをGPUフル活用 |
-| **OpenAI API 対応** | GPT-4o / GPT-4o mini / o3-mini 等をAPI経由で利用可能。ワンクリックでローカル⇔クラウドを切替 |
+| **OpenAI API 対応** | GPT-5.5 / GPT-5.4 / GPT-5.4 mini 等をAPI経由で利用可能。ワンクリックでローカル⇔クラウドを切替 |
 | **キャラクター切替** | JSON定義のキャラクターを自由に追加・即座に切替 |
 | **性格カスタマイズ** | システムプロンプト・口調・背景設定をキャラクターごとに編集 |
-| **モデル管理** | ローカルGGUFファイルの切替 + HuggingFaceからワンクリックダウンロード |
-| **思考モデル対応** | Qwen3 / GPT-OSS / Nemotron / o3-mini 等の thinking モデルに対応（思考過程の表示・折りたたみ） |
-| **音声入力 (STT)** | faster-whisper による日本語音声認識 |
+| **モデル管理** | ローカルGGUFファイルの切替 + HuggingFaceからワンクリックダウンロード（カタログは `resources/recommended_models.json` で編集可能） |
+| **思考モデル対応** | Qwen3.x / GPT-OSS / Nemotron 等の thinking モデルに対応（思考過程の表示・折りたたみ） |
+| **音声入力 (STT)** | faster-whisper による日本語音声認識（large-v3-turbo 対応） |
 | **音声出力 (TTS)** | Qwen3-TTS によるキャラクター別音声合成（CustomVoice / VoiceDesign / 音声クローン対応） |
-| **チャット履歴** | SQLiteによるセッション管理・履歴保存・復元 |
 | **ストリーミング生成** | トークン単位のリアルタイム出力（ローカル・OpenAI 両対応） |
 | **動的トークン調整** | ユーザー入力の内容・長さに応じてmax_tokensを自動最適化 |
 | **ダークテーマUI** | PySide6ベースのモダンなデスクトップUI |
@@ -94,15 +93,18 @@ OPENAI_API_KEY=sk-proj-your-api-key-here
 
 | モデル | 特徴 |
 |--------|------|
-| GPT-4o | 最新・高性能 |
-| GPT-4o mini | 高速・低コスト |
-| GPT-4 Turbo | 高性能 |
-| GPT-3.5 Turbo | 最安 |
-| o3-mini | 推論（思考）モデル |
+| GPT-5.4 mini | 推奨・高速/低コスト |
+| GPT-5.4 | 高性能 |
+| GPT-5.5 | 最高性能 |
+| GPT-5.4 nano | 最安・最速 |
+
+GPT-5.x 系は推論モデルのため、temperature 等のサンプリングパラメータは適用されず、
+`config.json` の `openai.reasoning_effort`（`low` / `medium` / `high`）で推論量を制御します。
 
 ## おすすめローカルモデル
 
 アプリ内の「モデルダウンロード」からHuggingFaceより直接ダウンロードできます。
+カタログは `resources/recommended_models.json` で管理されており、自由に追加・編集できます。
 
 ### 日本語特化モデル
 
@@ -111,17 +113,18 @@ OPENAI_API_KEY=sk-proj-your-api-key-here
 | GPT-OSS-Swallow-20B-RL | Q4_K_M | ~16.5GB | ✅ | 日本語強化GPT-OSS・MoE |
 | Nemotron-Nano-9B-v2-JP | Q4_K_M | ~7GB | ✅ | NVIDIA Mamba2ハイブリッド |
 | Qwen3-Swallow-8B-SFT | Q4_K_M | ~5.5GB | ✅ | 日本語強化Qwen3 |
+| Qwen3-Swallow-30B-A3B | Q4_K_M | ~19GB | ✅ | 日本語強化Qwen3・MoE |
 
 ### 汎用モデル
 
 | モデル | 量子化 | VRAM目安 | 思考 | 特徴 |
 |--------|--------|----------|------|------|
-| Qwen3-8B | Q4_K_M | ~5GB | ✅ | 軽量・高品質 |
-| Qwen3-14B | Q4_K_M | ~9GB | ✅ | バランス型 |
-| Gemma3-12B-IT | Q4_K_M | ~7.5GB | ✅ | 感情表現が豊か |
-| GPT-OSS-20B | Q4_K_M | ~12GB | ✅ | MoE軽量高性能 |
-| Llama3.1-8B-Inst | Q4_K_M | ~5GB | — | 汎用・RP派生豊富 |
-| Mistral-Nemo-12B | Q4_K_M | ~7.5GB | — | RP特化向き |
+| Qwen3.6-27B | UD-Q4_K_XL | ~18GB | ✅ | 最新世代・256Kコンテキスト |
+| Qwen3.6-35B-A3B | UD-Q4_K_XL | ~23GB | ✅ | 最新世代MoE・4090推奨 |
+| Qwen3.5-4B / 9B | Q4_K_M 他 | ~5.5〜13GB | ✅ | 軽量・高品質 |
+| Qwen3.5-35B-A3B | UD-Q4_K_M | ~22GB | ✅ | MoE・4090推奨 |
+| Gemma3-12B / 27B-IT | Q4_K_M | ~7.5〜17GB | ✅ | 感情表現が豊か |
+| GPT-OSS-20B | Q4_K_M 他 | ~12〜13GB | ✅ | MoE軽量高性能 |
 
 ## 同梱キャラクター
 
@@ -148,13 +151,14 @@ OPENAI_API_KEY=sk-proj-your-api-key-here
 | `inference` | `repeat_penalty` | 繰り返しペナルティ | `1.1` |
 | `ui` | `theme` | UIテーマ | `dark` |
 | `ui` | `font_size` | フォントサイズ | `14` |
-| `voice` | `whisper_model` | Whisperモデルサイズ | `medium` |
+| `voice` | `whisper_model` | Whisperモデルサイズ（`large-v3-turbo` 推奨） | `small` |
 | `voice` | `device` | 推論デバイス | `cuda` |
 | `voice` | `language` | 認識言語 | `ja` |
 | `tts` | `enabled` | TTS有効化 | `false` |
 | `tts` | `use_gpu` | TTS GPU使用 | `true` |
 | `tts` | `auto_play` | 自動再生 | `true` |
-| `openai` | `model` | OpenAI モデル名 | `gpt-4o` |
+| `openai` | `model` | OpenAI モデル名 | `gpt-5.4-mini` |
+| `openai` | `reasoning_effort` | GPT-5.x の推論量 (`low`/`medium`/`high`) | `low` |
 | `openai` | `enabled` | 起動時に OpenAI モードを有効化 | `false` |
 
 ### 環境変数 (`.env`)
@@ -187,26 +191,28 @@ CharacterLLM/
 │   │   ├── chat_engine.py   # チャットエンジン・推論実行
 │   │   ├── model_loader.py  # GGUFモデル管理・HFダウンロード
 │   │   ├── openai_provider.py # OpenAI API プロバイダー
+│   │   ├── provider_protocol.py # 推論プロバイダー共通インターフェース
 │   │   ├── gpu_utils.py     # GPU情報取得 (NVML)
 │   │   ├── voice_input.py   # 音声入力 (Whisper STT)
 │   │   ├── qwen3_tts_engine.py     # 音声出力 (Qwen3-TTS)
 │   │   ├── qwen3_tts_model_manager.py # Qwen3-TTS モデル管理
 │   │   ├── tts_base.py             # TTS エンジン抽象基底
 │   │   └── tts_router.py           # TTS ルーター
-│   ├── ui/
-│   │   ├── main_window.py   # メインウィンドウ
-│   │   ├── chat_widget.py   # チャット表示・入力
-│   │   ├── character_panel.py # キャラクター選択パネル
-│   │   ├── model_panel.py   # モデル選択・エンジン切替パネル
-│   │   ├── voice_panel.py   # 音声設定パネル
-│   │   ├── voice_button.py  # 音声入力ボタン
-│   │   ├── settings_dialog.py # 設定ダイアログ
-│   │   └── styles.py        # QSSスタイル定義
-│   └── data/
-│       └── database.py      # SQLiteチャット履歴
+│   └── ui/
+│       ├── main_window.py   # メインウィンドウ
+│       ├── chat_widget.py   # チャット表示・入力
+│       ├── character_panel.py # キャラクター選択パネル
+│       ├── model_panel.py   # モデル選択・エンジン切替パネル
+│       ├── voice_panel.py   # 音声設定パネル
+│       ├── voice_button.py  # 音声入力ボタン
+│       ├── settings_dialog.py # 設定ダイアログ
+│       └── styles.py        # QSSスタイル定義
+├── tests/
+│   └── test_think_filter.py # 思考ストリームフィルタのユニットテスト
 ├── logs/                    # ログ出力先 (.gitignore対象)
 ├── resources/
-│   └── icons/               # アイコン素材
+│   ├── icons/               # アイコン素材
+│   └── recommended_models.json # おすすめモデルカタログ
 └── docs/
     ├── USAGE.md             # 使い方マニュアル
     └── TECH_STACK.md        # 技術スタック詳細

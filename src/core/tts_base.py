@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import threading
 import wave
 from abc import ABC, abstractmethod
@@ -199,7 +200,6 @@ class TTSEngineBase(ABC):
     @staticmethod
     def _clean_text_for_tts(text: str) -> str:
         """LLM 応答テキストから TTS に不適切な要素を除去する。"""
-        import re
         t = text.strip()
         t = re.sub(r"```[\s\S]*?```", "", t)
         t = re.sub(r"`[^`]+`", "", t)
@@ -217,7 +217,6 @@ class TTSEngineBase(ABC):
     @staticmethod
     def _split_text(text: str, max_len: int = 100) -> list[str]:
         """テキストを句読点で区切り、max_len 以下のセグメントに分割する。"""
-        import re
         sentences = re.split(r"(?<=[。！？!?\n])", text)
         segments: list[str] = []
         buf = ""

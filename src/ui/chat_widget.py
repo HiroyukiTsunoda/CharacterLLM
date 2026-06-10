@@ -70,16 +70,6 @@ class InferenceWorker(QThread):
                     self._full_response += token
                     self.token_received.emit(token)
             self.chat_engine.finalize_stream(self._full_response)
-
-            # LLM (llama.cpp) の CUDA 操作を完全に完了させてから
-            # finished_signal を発信する。後続の TTS が GPU を安全に使えるようにする。
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-            except Exception:
-                pass
-
             self.finished_signal.emit(self._full_response)
         except Exception as e:
             logger.error("Inference error: %s", e)
