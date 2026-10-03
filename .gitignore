@@ -1,0 +1,31 @@
+# Secrets
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Models (large binary files)
+models/*.gguf
+models/.cache/
+
+# TTS models (large binary files)
+tts_models/
+
+# Logs
+logs/*.log
+
+# Build temp
+_build_llama_cpp_python/
+
+# IDE
+.cursor/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,47 @@
+{
+  "models_dir": "models",
+  "characters_dir": "characters",
+  "default_model": null,
+  "default_character": "default_assistant",
+  "gpu": {
+    "n_gpu_layers": -1,
+    "main_gpu": 0
+  },
+  "inference": {
+    "context_length": 4096,
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_tokens": 512,
+    "repeat_penalty": 1.1
+  },
+  "ui": {
+    "theme": "dark",
+    "window_width": 1920,
+    "window_height": 1080,
+    "font_size": 14
+  },
+  "voice": {
+    "input_device": 1,
+    "output_device": 6,
+    "whisper_model": "medium",
+    "device": "cuda",
+    "compute_type": "float16",
+    "language": "ja",
+    "auto_send": false
+  },
+  "tts": {
+    "enabled": false,
+    "use_gpu": true,
+    "auto_play": false,
+    "qwen3": {
+      "default_model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+      "dtype": "bfloat16",
+      "flash_attention": true
+    }
+  },
+  "openai": {
+    "model": "gpt-5.4-mini",
+    "reasoning_effort": "low",
+    "enabled": false
+  }
+}
